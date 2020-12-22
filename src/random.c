@@ -17,7 +17,6 @@
  */
 
 #include "random.h"
-#include "log.h"
 #include "thread.h" // for mutexes
 
 #include <math.h>
@@ -25,19 +24,21 @@
 #include <time.h>
 
 // getrandom() is not available in Android NDK API < 28 and needs glibc >= 2.25
-#if defined(__linux__) && !defined(__ANDROID__) && (!defined(__GLIBC__) || __GLIBC__ > 2 || __GLIBC_MINOR__ >= 25)
+#if defined(__linux__) && !defined(__ANDROID__) &&                                                 \
+    (!defined(__GLIBC__) || __GLIBC__ > 2 || __GLIBC_MINOR__ >= 25)
 
 #include <errno.h>
 #include <sys/random.h>
 
-static int random_bytes(void *buf, size_t size) {
+static int random_bytes(void *buf, size_t size, juice_logger_t *logger) {
 	ssize_t ret = getrandom(buf, size, 0);
 	if (ret < 0) {
-		JLOG_WARN("getrandom failed, errno=%d", errno);
+		JLOG_WARN(logger, "getrandom failed, errno=%d", errno);
 		return -1;
 	}
 	if ((size_t)ret < size) {
-		JLOG_WARN("getrandom returned too few bytes, size=%zu, returned=%zu", size, (size_t)ret);
+		JLOG_WARN(logger, "getrandom returned too few bytes, size=%zu, returned=%zu", size,
+		          (size_t)ret);
 		return -1;
 	}
 	return 0;
@@ -53,14 +54,15 @@ static int random_bytes(void *buf, size_t size) {
 //
 #include <bcrypt.h>
 
-static int random_bytes(void *buf, size_t size) {
+static int random_bytes(void *buf, size_t size, juice_logger_t *logger) {
 	// Requires Windows 7 or later
-	NTSTATUS status = BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)size, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+	NTSTATUS status =
+	    BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)size, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
 	return !status ? 0 : -1;
 }
 
 #else
-static int random_bytes(void *buf, size_t size) {
+static int random_bytes(void *buf, size_t size, juice_logger_t *logger) {
 	(void)buf;
 	(void)size;
 	return -1;
@@ -79,8 +81,8 @@ static unsigned int generate_seed() {
 #endif
 }
 
-void juice_random(void *buf, size_t size) {
-	if (random_bytes(buf, size) == 0)
+void juice_random(void *buf, size_t size, juice_logger_t *logger) {
+	if (random_bytes(buf, size, logger) == 0)
 		return;
 
 	// rand() is not thread-safe
@@ -92,12 +94,12 @@ void juice_random(void *buf, size_t size) {
 #define random_func random
 #define srandom_func srandom
 	if (!srandom_called)
-		JLOG_DEBUG("Using random() for random bytes");
+		JLOG_DEBUG(logger, "Using random() for random bytes");
 #else
 #define random_func rand
 #define srandom_func srand
 	if (!srandom_called)
-		JLOG_WARN("Falling back on rand() for random bytes");
+		JLOG_WARN(logger, "Falling back on rand() for random bytes");
 #endif
 	if (!srandom_called) {
 		srandom_func(generate_seed());
@@ -113,26 +115,26 @@ void juice_random(void *buf, size_t size) {
 	mutex_unlock(&rand_mutex);
 }
 
-void juice_random_str64(char *buf, size_t size) {
+void juice_random_str64(char *buf, size_t size, juice_logger_t *logger) {
 	static const char chars64[] =
 	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	size_t i = 0;
 	for (i = 0; i + 1 < size; ++i) {
 		uint8_t byte = 0;
-		juice_random(&byte, 1);
+		juice_random(&byte, 1, logger);
 		buf[i] = chars64[byte & 0x3F];
 	}
 	buf[i] = '\0';
 }
 
-uint32_t juice_rand32(void) {
+uint32_t juice_rand32(juice_logger_t *logger) {
 	uint32_t r = 0;
-	juice_random(&r, sizeof(r));
+	juice_random(&r, sizeof(r), logger);
 	return r;
 }
 
-uint64_t juice_rand64(void) {
+uint64_t juice_rand64(juice_logger_t *logger) {
 	uint64_t r = 0;
-	juice_random(&r, sizeof(r));
+	juice_random(&r, sizeof(r), logger);
 	return r;
 }

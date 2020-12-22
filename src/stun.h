@@ -24,6 +24,7 @@
 #include "addr.h"
 #include "hash.h"
 #include "hmac.h"
+#include "log.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -348,24 +349,26 @@ typedef struct stun_message {
 
 } stun_message_t;
 
-int stun_write(void *buf, size_t size, const stun_message_t *msg,
-               const char *password); // password may be NULL
+int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *password,
+               juice_logger_t *logger); // password may be NULL
 int stun_write_header(void *buf, size_t size, stun_class_t class, stun_method_t method,
                       const uint8_t *transaction_id);
 size_t stun_update_header_length(void *buf, size_t length);
-int stun_write_attr(void *buf, size_t size, uint16_t type, const void *value, size_t length);
+int stun_write_attr(void *buf, size_t size, uint16_t type, const void *value, size_t length,
+                    juice_logger_t *logger);
 int stun_write_value_mapped_address(void *buf, size_t size, const struct sockaddr *addr,
-                                    socklen_t addrlen, const uint8_t *mask);
+                                    socklen_t addrlen, const uint8_t *mask, juice_logger_t *logger);
 
-bool is_stun_datagram(const void *data, size_t size);
+bool is_stun_datagram(const void *data, size_t size, juice_logger_t *logger);
 
-int stun_read(void *data, size_t size, stun_message_t *msg);
+int stun_read(void *data, size_t size, stun_message_t *msg, juice_logger_t *logger);
 int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *begin,
-                   uint8_t *attr_begin, uint32_t *security_bits);
+                   uint8_t *attr_begin, uint32_t *security_bits, juice_logger_t *logger);
 int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t *mapped,
-                                   const uint8_t *mask);
+                                   const uint8_t *mask, juice_logger_t *logger);
 
-bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, const char *password);
+bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, const char *password,
+                          juice_logger_t *logger);
 
 void stun_compute_userhash(const char *username, const char *realm, uint8_t *out);
 void stun_prepend_nonce_cookie(char *nonce);
@@ -374,8 +377,9 @@ void stun_process_credentials(const stun_credentials_t *credentials, stun_creden
 const char *stun_get_error_reason(unsigned int code);
 
 // Export for tests
-JUICE_EXPORT int _juice_stun_read(void *data, size_t size, stun_message_t *msg);
+JUICE_EXPORT int _juice_stun_read(void *data, size_t size, stun_message_t *msg,
+                                  juice_logger_t *logger);
 JUICE_EXPORT bool _juice_stun_check_integrity(void *buf, size_t size, const stun_message_t *msg,
-                                              const char *password);
+                                              const char *password, juice_logger_t *logger);
 
 #endif

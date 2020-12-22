@@ -21,7 +21,6 @@
 #include "const_time.h"
 #include "crc32.h"
 #include "juice.h"
-#include "log.h"
 #include "udp.h"
 
 #include <assert.h>
@@ -56,11 +55,13 @@ static size_t align32(size_t len) {
 	return len;
 }
 
-static size_t generate_hmac_key(const stun_message_t *msg, const char *password, void *key) {
+static size_t generate_hmac_key(const stun_message_t *msg, const char *password, void *key,
+                                juice_logger_t *logger) {
 	if (*msg->credentials.realm != '\0') {
 		// long-term credentials
 		if (*msg->credentials.username == '\0')
-			JLOG_WARN("Generating HMAC key for long-term credentials with empty STUN username");
+			JLOG_WARN(logger,
+			          "Generating HMAC key for long-term credentials with empty STUN username");
 
 		char input[MAX_HMAC_INPUT_LEN];
 		int input_len = snprintf(input, MAX_HMAC_INPUT_LEN, "%s:%s:%s", msg->credentials.username,
@@ -95,13 +96,14 @@ static size_t generate_password_algorithms_attr(uint8_t *attr) {
 	return (uint8_t *)pwa - attr;
 }
 
-int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *password) {
+int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *password,
+               juice_logger_t *logger) {
 	uint8_t *begin = buf;
 	uint8_t *pos = begin;
 	uint8_t *end = begin + size;
 
-	JLOG_VERBOSE("Writing STUN message, class=0x%X, method=0x%X", (unsigned int)msg->msg_class,
-	             (unsigned int)msg->msg_method);
+	JLOG_VERBOSE(logger, "Writing STUN message, class=0x%X, method=0x%X",
+	             (unsigned int)msg->msg_class, (unsigned int)msg->msg_method);
 
 	size_t len =
 	    stun_write_header(pos, end - pos, msg->msg_class, msg->msg_method, msg->transaction_id);
@@ -119,21 +121,22 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 		error->code_number = msg->error_code % 100;
 		strcpy((char *)error->reason, reason);
 		len = stun_write_attr(pos, end - pos, STUN_ATTR_ERROR_CODE, error,
-		                      sizeof(struct stun_value_error_code) + strlen(reason));
+		                      sizeof(struct stun_value_error_code) + strlen(reason), logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->mapped.len) {
-		JLOG_VERBOSE("Writing XOR mapped address");
+		JLOG_VERBOSE(logger, "Writing XOR mapped address");
 		uint8_t value[32];
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
 		int value_len = stun_write_value_mapped_address(
-		    value, 32, (const struct sockaddr *)&msg->mapped.addr, msg->mapped.len, mask);
+		    value, 32, (const struct sockaddr *)&msg->mapped.addr, msg->mapped.len, mask, logger);
 		if (value_len > 0) {
-			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_MAPPED_ADDRESS, value, value_len);
+			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_MAPPED_ADDRESS, value, value_len,
+			                      logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
@@ -141,27 +144,28 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 	}
 	if (msg->priority) {
 		uint32_t priority = htonl(msg->priority);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_PRIORITY, &priority, 4);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_PRIORITY, &priority, 4, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->use_candidate) {
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_USE_CANDIDATE, NULL, 0);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_USE_CANDIDATE, NULL, 0, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->ice_controlling) {
 		uint64_t ice_controlling = htonll(msg->ice_controlling);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_ICE_CONTROLLING, &ice_controlling, 8);
+		len =
+		    stun_write_attr(pos, end - pos, STUN_ATTR_ICE_CONTROLLING, &ice_controlling, 8, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->ice_controlled) {
 		uint64_t ice_controlled = htonll(msg->ice_controlled);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_ICE_CONTROLLED, &ice_controlled, 8);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_ICE_CONTROLLED, &ice_controlled, 8, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
@@ -171,43 +175,45 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 		memset(&channel_number, 0, sizeof(channel_number));
 		channel_number.channel_number = htons(msg->channel_number);
 		len = stun_write_attr(pos, end - pos, STUN_ATTR_CHANNEL_NUMBER, &channel_number,
-		                      sizeof(channel_number));
+		                      sizeof(channel_number), logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->lifetime_set || msg->lifetime) {
 		uint32_t lifetime = htonl(msg->lifetime);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_LIFETIME, &lifetime, 4);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_LIFETIME, &lifetime, 4, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->peer.len) {
-		JLOG_VERBOSE("Writing XOR peer address");
+		JLOG_VERBOSE(logger, "Writing XOR peer address");
 		uint8_t value[32];
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
 		int value_len = stun_write_value_mapped_address(
-		    value, 32, (const struct sockaddr *)&msg->peer.addr, msg->peer.len, mask);
+		    value, 32, (const struct sockaddr *)&msg->peer.addr, msg->peer.len, mask, logger);
 		if (value_len > 0) {
-			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_PEER_ADDRESS, value, value_len);
+			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_PEER_ADDRESS, value, value_len,
+			                      logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
 		}
 	}
 	if (msg->relayed.len) {
-		JLOG_VERBOSE("Writing XOR relay address");
+		JLOG_VERBOSE(logger, "Writing XOR relay address");
 		uint8_t value[32];
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
 		int value_len = stun_write_value_mapped_address(
-		    value, 32, (const struct sockaddr *)&msg->relayed.addr, msg->relayed.len, mask);
+		    value, 32, (const struct sockaddr *)&msg->relayed.addr, msg->relayed.len, mask, logger);
 		if (value_len > 0) {
-			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_RELAYED_ADDRESS, value, value_len);
+			len = stun_write_attr(pos, end - pos, STUN_ATTR_XOR_RELAYED_ADDRESS, value, value_len,
+			                      logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
@@ -215,7 +221,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 	}
 	if (msg->data) {
 		len = stun_write_attr(pos, end - pos, STUN_ATTR_DATA, (const uint8_t *)msg->data,
-		                      msg->data_size);
+		                      msg->data_size, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
@@ -226,7 +232,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 		if (msg->next_port)
 			even_port.r |= 0x80;
 		len = stun_write_attr(pos, end - pos, STUN_ATTR_CHANNEL_NUMBER, &even_port,
-		                      sizeof(even_port));
+		                      sizeof(even_port), logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
@@ -236,27 +242,28 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 		memset(&requested_transport, 0, sizeof(requested_transport));
 		requested_transport.protocol = 17;
 		len = stun_write_attr(pos, end - pos, STUN_ATTR_REQUESTED_TRANSPORT, &requested_transport,
-		                      sizeof(requested_transport));
+		                      sizeof(requested_transport), logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->dont_fragment) {
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_DONT_FRAGMENT, NULL, 0);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_DONT_FRAGMENT, NULL, 0, logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 	if (msg->reservation_token) {
 		uint64_t reservation_token = htonll(msg->reservation_token);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_RESERVATION_TOKEN, &reservation_token, 8);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_RESERVATION_TOKEN, &reservation_token, 8,
+		                      logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
 	}
 
 	const char *software = "libjuice";
-	len = stun_write_attr(pos, end - pos, STUN_ATTR_SOFTWARE, software, strlen(software));
+	len = stun_write_attr(pos, end - pos, STUN_ATTR_SOFTWARE, software, strlen(software), logger);
 	if (len <= 0)
 		goto overflow;
 	pos += len;
@@ -264,14 +271,14 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 	if (msg->msg_class == STUN_CLASS_REQUEST) {
 		if (msg->credentials.enable_userhash) {
 			len = stun_write_attr(pos, end - pos, STUN_ATTR_USERHASH, msg->credentials.userhash,
-			                      HASH_SHA256_SIZE);
+			                      HASH_SHA256_SIZE, logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
 
 		} else if (*msg->credentials.username != '\0') {
 			len = stun_write_attr(pos, end - pos, STUN_ATTR_USERNAME, msg->credentials.username,
-			                      strlen(msg->credentials.username));
+			                      strlen(msg->credentials.username), logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
@@ -280,14 +287,14 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 	if (msg->msg_class == STUN_CLASS_REQUEST || msg->msg_method == STUN_METHOD_ALLOCATE) {
 		if (*msg->credentials.realm != '\0') {
 			len = stun_write_attr(pos, end - pos, STUN_ATTR_REALM, msg->credentials.realm,
-			                      strlen(msg->credentials.realm));
+			                      strlen(msg->credentials.realm), logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
 		}
 		if (*msg->credentials.nonce != '\0') {
 			len = stun_write_attr(pos, end - pos, STUN_ATTR_NONCE, msg->credentials.nonce,
-			                      strlen(msg->credentials.nonce));
+			                      strlen(msg->credentials.nonce), logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
@@ -295,7 +302,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 			if (msg->credentials.password_algorithm > 0) {
 				len = stun_write_attr(pos, end - pos, STUN_ATTR_PASSWORD_ALGORITHMS,
 				                      msg->credentials.password_algorithms_value,
-				                      msg->credentials.password_algorithms_value_size);
+				                      msg->credentials.password_algorithms_value_size, logger);
 				if (len <= 0)
 					goto overflow;
 				pos += len;
@@ -304,7 +311,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 				uint8_t pwa_value[STUN_MAX_PASSWORD_ALGORITHMS_VALUE_SIZE];
 				size_t pwa_size = generate_password_algorithms_attr(pwa_value);
 				len = stun_write_attr(pos, end - pos, STUN_ATTR_PASSWORD_ALGORITHMS, pwa_value,
-				                      pwa_size);
+				                      pwa_size, logger);
 				if (len <= 0)
 					goto overflow;
 				pos += len;
@@ -315,7 +322,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 				struct stun_value_password_algorithm pwa;
 				pwa.algorithm = htons(msg->credentials.password_algorithm);
 				len = stun_write_attr(pos, end - pos, STUN_ATTR_PASSWORD_ALGORITHM, &pwa,
-				                      sizeof(pwa));
+				                      sizeof(pwa), logger);
 				if (len <= 0)
 					goto overflow;
 				pos += len;
@@ -330,7 +337,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 		size_t tmp_length = pos - attr_begin + STUN_ATTR_SIZE + HMAC_SHA1_SIZE;
 		stun_update_header_length(begin, tmp_length);
 		uint8_t key[MAX_HMAC_KEY_LEN];
-		size_t key_len = generate_hmac_key(msg, password, key);
+		size_t key_len = generate_hmac_key(msg, password, key, logger);
 
 		// According to RFC 8489, the agent must include both MESSAGE-INTEGRITY and
 		// MESSAGE-INTEGRITY-SHA256. However, this makes older servers fail with error 420 Unknown
@@ -343,7 +350,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 			uint8_t hmac[HMAC_SHA256_SIZE];
 			hmac_sha256(begin, pos - begin, key, key_len, hmac);
 			len = stun_write_attr(pos, end - pos, STUN_ATTR_MESSAGE_INTEGRITY_SHA256, hmac,
-			                      HMAC_SHA256_SIZE);
+			                      HMAC_SHA256_SIZE, logger);
 			if (len <= 0)
 				goto overflow;
 			pos += len;
@@ -351,7 +358,8 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 
 		uint8_t hmac[HMAC_SHA1_SIZE];
 		hmac_sha1(begin, pos - begin, key, key_len, hmac);
-		len = stun_write_attr(pos, end - pos, STUN_ATTR_MESSAGE_INTEGRITY, hmac, HMAC_SHA1_SIZE);
+		len = stun_write_attr(pos, end - pos, STUN_ATTR_MESSAGE_INTEGRITY, hmac, HMAC_SHA1_SIZE,
+		                      logger);
 		if (len <= 0)
 			goto overflow;
 		pos += len;
@@ -359,13 +367,13 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 
 	size_t length = pos - attr_begin + STUN_ATTR_SIZE + 4;
 	if (length & 0x03) {
-		JLOG_ERROR("Written STUN message length is not multiple of 4, length=%zu", length);
+		JLOG_ERROR(logger, "Written STUN message length is not multiple of 4, length=%zu", length);
 		return -1;
 	}
 	stun_update_header_length(begin, length);
 
 	uint32_t fingerprint = htonl(CRC32(buf, pos - begin) ^ STUN_FINGERPRINT_XOR);
-	len = stun_write_attr(pos, end - pos, STUN_ATTR_FINGERPRINT, &fingerprint, 4);
+	len = stun_write_attr(pos, end - pos, STUN_ATTR_FINGERPRINT, &fingerprint, 4, logger);
 	if (len <= 0)
 		goto overflow;
 	pos += len;
@@ -373,7 +381,7 @@ int stun_write(void *buf, size_t size, const stun_message_t *msg, const char *pa
 	return (int)(pos - begin);
 
 overflow:
-	JLOG_ERROR("Not enough space in buffer for STUN message, size=%zu", size);
+	JLOG_ERROR(logger, "Not enough space in buffer for STUN message, size=%zu", size);
 	return -1;
 }
 
@@ -400,8 +408,10 @@ size_t stun_update_header_length(void *buf, size_t length) {
 	return previous;
 }
 
-int stun_write_attr(void *buf, size_t size, uint16_t type, const void *value, size_t length) {
-	JLOG_VERBOSE("Writing STUN attribute type 0x%X, length=%zu", (unsigned int)type, length);
+int stun_write_attr(void *buf, size_t size, uint16_t type, const void *value, size_t length,
+                    juice_logger_t *logger) {
+	JLOG_VERBOSE(logger, "Writing STUN attribute type 0x%X, length=%zu", (unsigned int)type,
+	             length);
 
 	if (size < sizeof(struct stun_attr) + length)
 		return -1;
@@ -419,7 +429,8 @@ int stun_write_attr(void *buf, size_t size, uint16_t type, const void *value, si
 }
 
 int stun_write_value_mapped_address(void *buf, size_t size, const struct sockaddr *addr,
-                                    socklen_t addrlen, const uint8_t *mask) {
+                                    socklen_t addrlen, const uint8_t *mask,
+                                    juice_logger_t *logger) {
 	if (size < sizeof(struct stun_value_mapped_address))
 		return -1;
 
@@ -432,7 +443,7 @@ int stun_write_value_mapped_address(void *buf, size_t size, const struct sockadd
 			return -1;
 		if (addrlen < sizeof(struct sockaddr_in))
 			return -1;
-		JLOG_VERBOSE("Writing IPv4 address");
+		JLOG_VERBOSE(logger, "Writing IPv4 address");
 		const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 		value->port = sin->sin_port ^ *((uint16_t *)mask);
 		const uint8_t *bytes = (const uint8_t *)&sin->sin_addr;
@@ -446,7 +457,7 @@ int stun_write_value_mapped_address(void *buf, size_t size, const struct sockadd
 			return -1;
 		if (addrlen < sizeof(struct sockaddr_in6))
 			return -1;
-		JLOG_VERBOSE("Writing IPv6 address");
+		JLOG_VERBOSE(logger, "Writing IPv6 address");
 		const struct sockaddr_in6 *sin6 = (const struct sockaddr_in6 *)addr;
 		value->port = sin6->sin6_port ^ *((uint16_t *)mask);
 		const uint8_t *bytes = (const uint8_t *)&sin6->sin6_addr;
@@ -455,29 +466,29 @@ int stun_write_value_mapped_address(void *buf, size_t size, const struct sockadd
 		return sizeof(struct stun_value_mapped_address) + 16;
 	}
 	default: {
-		JLOG_DEBUG("Unknown address family %u", (unsigned int)addr->sa_family);
+		JLOG_DEBUG(logger, "Unknown address family %u", (unsigned int)addr->sa_family);
 		return -1;
 	}
 	}
 }
 
-bool is_stun_datagram(const void *data, size_t size) {
+bool is_stun_datagram(const void *data, size_t size, juice_logger_t *logger) {
 	// RFC 8489: The most significant 2 bits of every STUN message MUST be zeroes. This can be used
 	// to differentiate STUN packets from other protocols when STUN is multiplexed with other
 	// protocols on the same port.
 	if (!size || *((uint8_t *)data) & 0xC0) {
-		JLOG_VERBOSE("Not a STUN message: first 2 bits are not zeroes");
+		JLOG_VERBOSE(logger, "Not a STUN message: first 2 bits are not zeroes");
 		return false;
 	}
 
 	if (size < sizeof(struct stun_header)) {
-		JLOG_VERBOSE("Not a STUN message: message too short, size=%zu", size);
+		JLOG_VERBOSE(logger, "Not a STUN message: message too short, size=%zu", size);
 		return false;
 	}
 
 	const struct stun_header *header = data;
 	if (ntohl(header->magic) != STUN_MAGIC) {
-		JLOG_VERBOSE("Not a STUN message: magic number invalid");
+		JLOG_VERBOSE(logger, "Not a STUN message: magic number invalid");
 		return false;
 	}
 
@@ -487,11 +498,11 @@ bool is_stun_datagram(const void *data, size_t size) {
 	// from packets of other protocols.
 	const size_t length = ntohs(header->length);
 	if (length & 0x03) {
-		JLOG_VERBOSE("Not a STUN message: invalid length %zu not multiple of 4", length);
+		JLOG_VERBOSE(logger, "Not a STUN message: invalid length %zu not multiple of 4", length);
 		return false;
 	}
 	if (size != sizeof(struct stun_header) + length) {
-		JLOG_VERBOSE("Not a STUN message: invalid length %zu while expecting %zu", length,
+		JLOG_VERBOSE(logger, "Not a STUN message: invalid length %zu while expecting %zu", length,
 		             size - sizeof(struct stun_header));
 		return false;
 	}
@@ -499,13 +510,13 @@ bool is_stun_datagram(const void *data, size_t size) {
 	return true;
 }
 
-int stun_read(void *data, size_t size, stun_message_t *msg) {
+int stun_read(void *data, size_t size, stun_message_t *msg, juice_logger_t *logger) {
 	memset(msg, 0, sizeof(*msg));
 
 	const struct stun_header *header = data;
 	const size_t length = ntohs(header->length);
 	if (size < sizeof(struct stun_header) + length) {
-		JLOG_ERROR("Invalid STUN message length, length=%zu, available=%zu", length,
+		JLOG_ERROR(logger, "Invalid STUN message length, length=%zu, available=%zu", length,
 		           size - sizeof(struct stun_header));
 		return -1;
 	}
@@ -514,8 +525,8 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 	msg->msg_class = (stun_class_t)(type & STUN_CLASS_MASK);
 	msg->msg_method = (stun_method_t)(type & ~STUN_CLASS_MASK);
 	memcpy(msg->transaction_id, header->transaction_id, STUN_TRANSACTION_ID_SIZE);
-	JLOG_VERBOSE("Reading STUN message, class=0x%X, method=0x%X", (unsigned int)msg->msg_class,
-	             (unsigned int)msg->msg_method);
+	JLOG_VERBOSE(logger, "Reading STUN message, class=0x%X, method=0x%X",
+	             (unsigned int)msg->msg_class, (unsigned int)msg->msg_method);
 
 	uint32_t security_bits = 0;
 
@@ -524,15 +535,15 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 	uint8_t *end = attr_begin + length;
 	const uint8_t *pos = attr_begin;
 	while (pos != end) {
-		int ret = stun_read_attr(pos, end - pos, msg, begin, attr_begin, &security_bits);
+		int ret = stun_read_attr(pos, end - pos, msg, begin, attr_begin, &security_bits, logger);
 		if (ret <= 0) {
-			JLOG_DEBUG("Reading STUN attribute failed");
+			JLOG_DEBUG(logger, "Reading STUN attribute failed");
 			return -1;
 		}
 		pos += ret;
 	}
 
-	JLOG_VERBOSE("Finished reading STUN attributes");
+	JLOG_VERBOSE(logger, "Finished reading STUN attributes");
 
 	stun_credentials_t *credentials = &msg->credentials;
 
@@ -545,7 +556,8 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 	    (msg->error_code == 401 || msg->error_code == 438) &&
 	    security_bits & STUN_SECURITY_PASSWORD_ALGORITHMS_BIT &&
 	    credentials->password_algorithms_value_size == 0) {
-		JLOG_INFO("STUN Security Feature \"Password algorithms\" bit is set in %u error response "
+		JLOG_INFO(logger,
+		          "STUN Security Feature \"Password algorithms\" bit is set in %u error response "
 		          "but the corresponding attribute is missing",
 		          msg->error_code);
 		msg->error_code = STUN_ERROR_INTERNAL_VALIDATION_FAILED; // so the agent will give up
@@ -565,11 +577,11 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 			credentials->password_algorithm = STUN_PASSWORD_ALGORITHM_MD5;
 
 		} else if (credentials->password_algorithm == STUN_PASSWORD_ALGORITHM_UNSET) {
-			JLOG_INFO("No suitable password algorithm in STUN request");
+			JLOG_INFO(logger, "No suitable password algorithm in STUN request");
 			msg->error_code = STUN_ERROR_INTERNAL_VALIDATION_FAILED;
 
 		} else if (credentials->password_algorithms_value_size == 0) {
-			JLOG_INFO("Missing password algorithms list in STUN request");
+			JLOG_INFO(logger, "Missing password algorithms list in STUN request");
 			msg->error_code = STUN_ERROR_INTERNAL_VALIDATION_FAILED;
 
 		} else {
@@ -577,14 +589,14 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 			size_t pwa_size = generate_password_algorithms_attr(pwa_value);
 			if (pwa_size != credentials->password_algorithms_value_size ||
 			    memcmp(credentials->password_algorithms_value, pwa_value, pwa_size) != 0) {
-				JLOG_INFO("Password algorithms list is invalid in STUN request");
+				JLOG_INFO(logger, "Password algorithms list is invalid in STUN request");
 				msg->error_code = STUN_ERROR_INTERNAL_VALIDATION_FAILED;
 			}
 		}
 	}
 
 	if (security_bits & STUN_SECURITY_USERNAME_ANONYMITY_BIT) {
-		JLOG_VERBOSE("Remote agent supports user anonymity");
+		JLOG_VERBOSE(logger, "Remote agent supports user anonymity");
 		credentials->enable_userhash = true;
 	}
 
@@ -592,25 +604,25 @@ int stun_read(void *data, size_t size, stun_message_t *msg) {
 }
 
 int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *begin,
-                   uint8_t *attr_begin, uint32_t *security_bits) {
+                   uint8_t *attr_begin, uint32_t *security_bits, juice_logger_t *logger) {
 	// RFC 8489: When present, the FINGERPRINT attribute MUST be the last attribute in the
 	// message and thus will appear after MESSAGE-INTEGRITY and MESSAGE-INTEGRITY-SHA256.
 	if (msg->has_fingerprint) {
-		JLOG_DEBUG("Invalid STUN attribute after fingerprint");
+		JLOG_DEBUG(logger, "Invalid STUN attribute after fingerprint");
 		return -1;
 	}
 
 	if (size < sizeof(struct stun_attr)) {
-		JLOG_VERBOSE("STUN attribute too short");
+		JLOG_VERBOSE(logger, "STUN attribute too short");
 		return -1;
 	}
 
 	const struct stun_attr *attr = data;
 	size_t length = ntohs(attr->length);
 	stun_attr_type_t type = (stun_attr_type_t)ntohs(attr->type);
-	JLOG_VERBOSE("Reading attribute 0x%X, length=%zu", (unsigned int)type, length);
+	JLOG_VERBOSE(logger, "Reading attribute 0x%X, length=%zu", (unsigned int)type, length);
 	if (size < sizeof(struct stun_attr) + length) {
-		JLOG_DEBUG("STUN attribute length invalid, length=%zu, available=%zu", length,
+		JLOG_DEBUG(logger, "STUN attribute length invalid, length=%zu, available=%zu", length,
 		           size - sizeof(struct stun_attr));
 		return -1;
 	}
@@ -618,7 +630,8 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 	// RFC 8489: Note that agents MUST ignore all attributes that follow MESSAGE-INTEGRITY, with
 	// the exception of the MESSAGE-INTEGRITY-SHA256 and FINGERPRINT attributes.
 	if (msg->has_integrity && type != STUN_ATTR_FINGERPRINT) {
-		JLOG_DEBUG("Ignoring STUN attribute 0x%X after message integrity", (unsigned int)type);
+		JLOG_DEBUG(logger, "Ignoring STUN attribute 0x%X after message integrity",
+		           (unsigned int)type);
 		while (length & 0x03)
 			++length; // attributes are aligned on 4 bytes
 		return (int)(sizeof(struct stun_attr) + length);
@@ -626,25 +639,26 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 
 	switch (type) {
 	case STUN_ATTR_MAPPED_ADDRESS: {
-		JLOG_VERBOSE("Reading mapped address");
+		JLOG_VERBOSE(logger, "Reading mapped address");
 		uint8_t zero_mask[16] = {0};
-		if (stun_read_value_mapped_address(attr->value, length, &msg->mapped, zero_mask) < 0)
+		if (stun_read_value_mapped_address(attr->value, length, &msg->mapped, zero_mask, logger) <
+		    0)
 			return -1;
 		break;
 	}
 	case STUN_ATTR_XOR_MAPPED_ADDRESS: {
-		JLOG_VERBOSE("Reading XOR mapped address");
+		JLOG_VERBOSE(logger, "Reading XOR mapped address");
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
-		if (stun_read_value_mapped_address(attr->value, length, &msg->mapped, mask) < 0)
+		if (stun_read_value_mapped_address(attr->value, length, &msg->mapped, mask, logger) < 0)
 			return -1;
 		break;
 	}
 	case STUN_ATTR_ERROR_CODE: {
-		JLOG_VERBOSE("Reading error code");
+		JLOG_VERBOSE(logger, "Reading error code");
 		if (length < sizeof(struct stun_value_error_code)) {
-			JLOG_DEBUG("STUN error code value too short, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN error code value too short, length=%zu", length);
 			return -1;
 		}
 		const struct stun_value_error_code *error =
@@ -656,51 +670,52 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		memcpy(buffer, (const char *)error->reason, reason_length);
 		buffer[reason_length] = '\0';
 
-		JLOG_INFO("Got STUN error code %u, reason \"%s\"", msg->error_code, buffer);
+		JLOG_INFO(logger, "Got STUN error code %u, reason \"%s\"", msg->error_code, buffer);
 		break;
 	}
 	case STUN_ATTR_UNKNOWN_ATTRIBUTES: {
-		JLOG_VERBOSE("Reading STUN unknown attributes");
+		JLOG_VERBOSE(logger, "Reading STUN unknown attributes");
 		const uint16_t *attributes = (const uint16_t *)attr->value;
 		for (int i = 0; i < (int)ntohs(attr->length) / 2; ++i) {
 			stun_attr_type_t type = (stun_attr_type_t)ntohs(attributes[i]);
-			JLOG_INFO("Got unknown attribute response for attribute 0x%X", (unsigned int)type);
+			JLOG_INFO(logger, "Got unknown attribute response for attribute 0x%X",
+			          (unsigned int)type);
 		}
 		break;
 	}
 	case STUN_ATTR_USERNAME: {
-		JLOG_VERBOSE("Reading username");
+		JLOG_VERBOSE(logger, "Reading username");
 		if (length + 1 > STUN_MAX_USERNAME_LEN) {
-			JLOG_WARN("STUN username attribute value too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN username attribute value too long, length=%zu", length);
 			return -1;
 		}
 		memcpy(msg->credentials.username, (const char *)attr->value, length);
 		msg->credentials.username[length] = '\0';
-		JLOG_VERBOSE("Got username: %s", msg->credentials.username);
+		JLOG_VERBOSE(logger, "Got username: %s", msg->credentials.username);
 		break;
 	}
 	case STUN_ATTR_MESSAGE_INTEGRITY: {
-		JLOG_VERBOSE("Reading message integrity");
+		JLOG_VERBOSE(logger, "Reading message integrity");
 		if (length != HMAC_SHA1_SIZE) {
-			JLOG_DEBUG("STUN message integrity length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN message integrity length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->has_integrity = true;
 		break;
 	}
 	case STUN_ATTR_MESSAGE_INTEGRITY_SHA256: {
-		JLOG_VERBOSE("Reading message integrity SHA256");
+		JLOG_VERBOSE(logger, "Reading message integrity SHA256");
 		if (length != HMAC_SHA256_SIZE) {
-			JLOG_DEBUG("STUN message integrity SHA256 length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN message integrity SHA256 length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->has_integrity = true;
 		break;
 	}
 	case STUN_ATTR_FINGERPRINT: {
-		JLOG_VERBOSE("Reading fingerprint");
+		JLOG_VERBOSE(logger, "Reading fingerprint");
 		if (length != 4) {
-			JLOG_DEBUG("STUN fingerprint length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN fingerprint length invalid, length=%zu", length);
 			return -1;
 		}
 		size_t tmp_length = (uint8_t *)data - attr_begin + STUN_ATTR_SIZE + 4;
@@ -710,34 +725,34 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 
 		uint32_t fingerprint = ntohl(*((uint32_t *)attr->value));
 		if (fingerprint != expected) {
-			JLOG_ERROR("STUN fingerprint check failed, expected=%lX, actual=%lX",
+			JLOG_ERROR(logger, "STUN fingerprint check failed, expected=%lX, actual=%lX",
 			           (unsigned long)expected, (unsigned long)fingerprint);
 			return -1;
 		}
-		JLOG_VERBOSE("STUN fingerprint check succeeded");
+		JLOG_VERBOSE(logger, "STUN fingerprint check succeeded");
 		msg->has_fingerprint = true;
 		break;
 	}
 	case STUN_ATTR_REALM: {
-		JLOG_VERBOSE("Reading realm");
+		JLOG_VERBOSE(logger, "Reading realm");
 		if (length + 1 > STUN_MAX_REALM_LEN) {
-			JLOG_WARN("STUN realm attribute value too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN realm attribute value too long, length=%zu", length);
 			return -1;
 		}
 		memcpy(msg->credentials.realm, (const char *)attr->value, length);
 		msg->credentials.realm[length] = '\0';
-		JLOG_VERBOSE("Got realm: %s", msg->credentials.realm);
+		JLOG_VERBOSE(logger, "Got realm: %s", msg->credentials.realm);
 		break;
 	}
 	case STUN_ATTR_NONCE: {
-		JLOG_VERBOSE("Reading nonce");
+		JLOG_VERBOSE(logger, "Reading nonce");
 		if (length + 1 > STUN_MAX_NONCE_LEN) {
-			JLOG_WARN("STUN nonce attribute value too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN nonce attribute value too long, length=%zu", length);
 			return -1;
 		}
 		memcpy(msg->credentials.nonce, (const char *)attr->value, length);
 		msg->credentials.nonce[length] = '\0';
-		JLOG_VERBOSE("Got nonce: %s", msg->credentials.nonce);
+		JLOG_VERBOSE(logger, "Got nonce: %s", msg->credentials.nonce);
 
 		// If the nonce of a response starts with the nonce cookie, decode the Security Feature bits
 		// See https://tools.ietf.org/html/rfc8489#section-9.2
@@ -753,23 +768,24 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 			int len = BASE64_DECODE(encoded_security_bits, bytes + 1, 3);
 			if (len == 3) {
 				*security_bits = ntohl(*((uint32_t *)bytes));
-				JLOG_VERBOSE("Nonce has cookie, Security Feature bits are 0x%lX",
+				JLOG_VERBOSE(logger, "Nonce has cookie, Security Feature bits are 0x%lX",
 				             (unsigned long)*security_bits);
 			} else {
-				JLOG_WARN("Nonce has cookie, but the encoded Security Feature bits field \"%s\" is "
+				JLOG_WARN(logger,
+				          "Nonce has cookie, but the encoded Security Feature bits field \"%s\" is "
 				          "invalid",
 				          encoded_security_bits);
 				security_bits = 0;
 			}
 		} else if (msg->msg_class == STUN_CLASS_RESP_ERROR) {
-			JLOG_INFO("Remote agent does not support RFC 8489");
+			JLOG_INFO(logger, "Remote agent does not support RFC 8489");
 		}
 		break;
 	}
 	case STUN_ATTR_PASSWORD_ALGORITHM: {
-		JLOG_VERBOSE("Reading password algorithm");
+		JLOG_VERBOSE(logger, "Reading password algorithm");
 		if (length < sizeof(struct stun_value_password_algorithm)) {
-			JLOG_WARN("STUN password algorithm value too short, length=%zu", length);
+			JLOG_WARN(logger, "STUN password algorithm value too short, length=%zu", length);
 			return -1;
 		}
 		if (!STUN_IS_RESPONSE(msg->msg_class)) {
@@ -780,20 +796,20 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 			    algorithm == STUN_PASSWORD_ALGORITHM_SHA256)
 				msg->credentials.password_algorithm = algorithm;
 			else
-				JLOG_WARN("Unknown password algorithm 0x%hX", algorithm);
+				JLOG_WARN(logger, "Unknown password algorithm 0x%hX", algorithm);
 		} else {
-			JLOG_WARN("Found password algorithm in response, ignoring");
+			JLOG_WARN(logger, "Found password algorithm in response, ignoring");
 		}
 		break;
 	}
 	case STUN_ATTR_PASSWORD_ALGORITHMS: {
-		JLOG_VERBOSE("Reading password algorithms list");
+		JLOG_VERBOSE(logger, "Reading password algorithms list");
 		if (length < sizeof(struct stun_value_password_algorithm)) {
-			JLOG_WARN("STUN password algorithms list too short, length=%zu", length);
+			JLOG_WARN(logger, "STUN password algorithms list too short, length=%zu", length);
 			return -1;
 		}
 		if (length > STUN_MAX_PASSWORD_ALGORITHMS_VALUE_SIZE) {
-			JLOG_WARN("STUN password algorithms list too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN password algorithms list too long, length=%zu", length);
 			return -1;
 		}
 
@@ -805,7 +821,8 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 			const uint8_t *end = pos + length;
 			while (pos < end) {
 				if ((size_t)(end - pos) < sizeof(struct stun_value_password_algorithm)) {
-					JLOG_WARN("STUN password algorithms list truncated, available=%zu", end - pos);
+					JLOG_WARN(logger, "STUN password algorithms list truncated, available=%zu",
+					          end - pos);
 					return -1;
 				}
 				const struct stun_value_password_algorithm *pwa =
@@ -818,6 +835,7 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 
 				if ((size_t)(end - pos) < padded_length) {
 					JLOG_WARN(
+					    logger,
 					    "STUN password algorithm parameters too long, length=%zu, padded=%zu, "
 					    "available=%zu",
 					    parameters_length, padded_length, end - pos);
@@ -832,15 +850,15 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 					break;
 				}
 
-				JLOG_DEBUG("Unknown password algorithm 0x%hX", algorithm);
+				JLOG_DEBUG(logger, "Unknown password algorithm 0x%hX", algorithm);
 			}
 		}
 		break;
 	}
 	case STUN_ATTR_USERHASH: {
-		JLOG_VERBOSE("Reading user hash");
+		JLOG_VERBOSE(logger, "Reading user hash");
 		if (length != HASH_SHA256_SIZE) {
-			JLOG_WARN("STUN user hash value too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN user hash value too long, length=%zu", length);
 			return -1;
 		}
 		memcpy(msg->credentials.userhash, attr->value, HASH_SHA256_SIZE);
@@ -848,54 +866,54 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		break;
 	}
 	case STUN_ATTR_SOFTWARE: {
-		JLOG_VERBOSE("Reading software");
+		JLOG_VERBOSE(logger, "Reading software");
 		if (length + 1 > STUN_MAX_SOFTWARE_LEN) {
-			JLOG_WARN("STUN software attribute value too long, length=%zu", length);
+			JLOG_WARN(logger, "STUN software attribute value too long, length=%zu", length);
 			return -1;
 		}
 		char buffer[STUN_MAX_SOFTWARE_LEN];
 		memcpy(buffer, (const char *)attr->value, length);
 		buffer[length] = '\0';
-		JLOG_VERBOSE("Remote agent is \"%s\"", buffer);
+		JLOG_VERBOSE(logger, "Remote agent is \"%s\"", buffer);
 		break;
 	}
 	case STUN_ATTR_PRIORITY: {
-		JLOG_VERBOSE("Reading priority");
+		JLOG_VERBOSE(logger, "Reading priority");
 		if (length != 4) {
-			JLOG_DEBUG("STUN priority length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN priority length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->priority = ntohl(*((uint32_t *)attr->value));
-		JLOG_VERBOSE("Got priority: %lu", (unsigned long)msg->priority);
+		JLOG_VERBOSE(logger, "Got priority: %lu", (unsigned long)msg->priority);
 		break;
 	}
 	case STUN_ATTR_USE_CANDIDATE: {
-		JLOG_VERBOSE("Found use candidate flag");
+		JLOG_VERBOSE(logger, "Found use candidate flag");
 		msg->use_candidate = true;
 		break;
 	}
 	case STUN_ATTR_ICE_CONTROLLING: {
-		JLOG_VERBOSE("Found ICE controlling attribute");
+		JLOG_VERBOSE(logger, "Found ICE controlling attribute");
 		if (length != 8) {
-			JLOG_DEBUG("STUN ICE controlling attribute length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN ICE controlling attribute length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->ice_controlling = ntohll(*((uint64_t *)attr->value));
 		break;
 	}
 	case STUN_ATTR_ICE_CONTROLLED: {
-		JLOG_VERBOSE("Found ICE controlled attribute");
+		JLOG_VERBOSE(logger, "Found ICE controlled attribute");
 		if (length != 8) {
-			JLOG_DEBUG("STUN ICE controlled attribute length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN ICE controlled attribute length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->ice_controlled = ntohll(*((uint64_t *)attr->value));
 		break;
 	}
 	case STUN_ATTR_CHANNEL_NUMBER: {
-		JLOG_VERBOSE("Reading channel number attribute");
+		JLOG_VERBOSE(logger, "Reading channel number attribute");
 		if (length < sizeof(struct stun_value_channel_number)) {
-			JLOG_DEBUG("STUN channel number attribute value too short, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN channel number attribute value too short, length=%zu", length);
 			return -1;
 		}
 		const struct stun_value_channel_number *channel_number =
@@ -904,9 +922,9 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		break;
 	}
 	case STUN_ATTR_LIFETIME: {
-		JLOG_VERBOSE("Reading lifetime attribute");
+		JLOG_VERBOSE(logger, "Reading lifetime attribute");
 		if (length != 4) {
-			JLOG_DEBUG("STUN lifetime attribute length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN lifetime attribute length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->lifetime = ntohl(*((uint32_t *)attr->value));
@@ -914,33 +932,33 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		break;
 	}
 	case STUN_ATTR_XOR_PEER_ADDRESS: {
-		JLOG_VERBOSE("Reading XOR peer address");
+		JLOG_VERBOSE(logger, "Reading XOR peer address");
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
-		if (stun_read_value_mapped_address(attr->value, length, &msg->peer, mask) < 0)
+		if (stun_read_value_mapped_address(attr->value, length, &msg->peer, mask, logger) < 0)
 			return -1;
 		break;
 	}
 	case STUN_ATTR_XOR_RELAYED_ADDRESS: {
-		JLOG_VERBOSE("Reading XOR relayed address");
+		JLOG_VERBOSE(logger, "Reading XOR relayed address");
 		uint8_t mask[16];
 		*((uint32_t *)mask) = htonl(STUN_MAGIC);
 		memcpy(mask + 4, msg->transaction_id, 12);
-		if (stun_read_value_mapped_address(attr->value, length, &msg->relayed, mask) < 0)
+		if (stun_read_value_mapped_address(attr->value, length, &msg->relayed, mask, logger) < 0)
 			return -1;
 		break;
 	}
 	case STUN_ATTR_DATA: {
-		JLOG_VERBOSE("Found data");
+		JLOG_VERBOSE(logger, "Found data");
 		msg->data = (const char *)attr->value;
 		msg->data_size = length;
 		break;
 	}
 	case STUN_ATTR_EVEN_PORT: {
-		JLOG_VERBOSE("Found even port attribute");
+		JLOG_VERBOSE(logger, "Found even port attribute");
 		if (length < 1) {
-			JLOG_DEBUG("STUN even port attribute length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN even port attribute length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->even_port = true;
@@ -948,15 +966,16 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		break;
 	}
 	case STUN_ATTR_REQUESTED_TRANSPORT: {
-		JLOG_VERBOSE("Found requested transport attribute");
+		JLOG_VERBOSE(logger, "Found requested transport attribute");
 		if (length < sizeof(struct stun_value_requested_transport)) {
-			JLOG_DEBUG("STUN requested transport attribute length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN requested transport attribute length invalid, length=%zu",
+			           length);
 			return -1;
 		}
 		const struct stun_value_requested_transport *requested_transport =
 		    (const struct stun_value_requested_transport *)attr->value;
 		if (requested_transport->protocol != 17) { // UDP
-			JLOG_WARN("Unexpected requested transport protocol: %d",
+			JLOG_WARN(logger, "Unexpected requested transport protocol: %d",
 			          (int)requested_transport->protocol);
 			return -1;
 		}
@@ -964,14 +983,14 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 		break;
 	}
 	case STUN_ATTR_DONT_FRAGMENT: {
-		JLOG_VERBOSE("Found don't fragment attribute");
+		JLOG_VERBOSE(logger, "Found don't fragment attribute");
 		msg->dont_fragment = true;
 		break;
 	}
 	case STUN_ATTR_RESERVATION_TOKEN: {
-		JLOG_VERBOSE("Found reservation token");
+		JLOG_VERBOSE(logger, "Found reservation token");
 		if (length != 8) {
-			JLOG_DEBUG("STUN reservation token length invalid, length=%zu", length);
+			JLOG_DEBUG(logger, "STUN reservation token length invalid, length=%zu", length);
 			return -1;
 		}
 		msg->reservation_token = ntohll(*((uint64_t *)attr->value));
@@ -980,9 +999,10 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 	default: {
 		// Ignore
 		if (STUN_IS_OPTIONAL_ATTR(type))
-			JLOG_DEBUG("Ignoring unknown optional STUN attribute type 0x%X", (unsigned int)type);
+			JLOG_DEBUG(logger, "Ignoring unknown optional STUN attribute type 0x%X",
+			           (unsigned int)type);
 		else
-			JLOG_WARN("Unknown STUN attribute type 0x%X, ignoring", (unsigned int)type);
+			JLOG_WARN(logger, "Unknown STUN attribute type 0x%X, ignoring", (unsigned int)type);
 		break;
 	}
 	}
@@ -990,10 +1010,10 @@ int stun_read_attr(const void *data, size_t size, stun_message_t *msg, uint8_t *
 }
 
 int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t *mapped,
-                                   const uint8_t *mask) {
+                                   const uint8_t *mask, juice_logger_t *logger) {
 	size_t len = sizeof(struct stun_value_mapped_address);
 	if (size < len) {
-		JLOG_VERBOSE("STUN mapped address value too short, size=%zu", size);
+		JLOG_VERBOSE(logger, "STUN mapped address value too short, size=%zu", size);
 		return -1;
 	}
 	const struct stun_value_mapped_address *value = data;
@@ -1002,10 +1022,10 @@ int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t 
 	case STUN_ADDRESS_FAMILY_IPV4: {
 		len += 4;
 		if (size < len) {
-			JLOG_DEBUG("IPv4 mapped address value too short, size=%zu", size);
+			JLOG_DEBUG(logger, "IPv4 mapped address value too short, size=%zu", size);
 			return -1;
 		}
-		JLOG_VERBOSE("Reading IPv4 address");
+		JLOG_VERBOSE(logger, "Reading IPv4 address");
 		mapped->len = sizeof(struct sockaddr_in);
 		struct sockaddr_in *sin = (struct sockaddr_in *)&mapped->addr;
 		sin->sin_family = AF_INET;
@@ -1018,10 +1038,10 @@ int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t 
 	case STUN_ADDRESS_FAMILY_IPV6: {
 		len += 16;
 		if (size < len) {
-			JLOG_DEBUG("IPv6 mapped address value too short, size=%zu", size);
+			JLOG_DEBUG(logger, "IPv6 mapped address value too short, size=%zu", size);
 			return -1;
 		}
-		JLOG_VERBOSE("Reading IPv6 address");
+		JLOG_VERBOSE(logger, "Reading IPv6 address");
 		mapped->len = sizeof(struct sockaddr_in6);
 		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&mapped->addr;
 		sin6->sin6_family = AF_INET6;
@@ -1032,7 +1052,7 @@ int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t 
 		break;
 	}
 	default: {
-		JLOG_DEBUG("Unknown STUN address family 0x%X", (unsigned int)family);
+		JLOG_DEBUG(logger, "Unknown STUN address family 0x%X", (unsigned int)family);
 		len = size;
 		break;
 	}
@@ -1040,7 +1060,8 @@ int stun_read_value_mapped_address(const void *data, size_t size, addr_record_t 
 	return (int)len;
 }
 
-bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, const char *password) {
+bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, const char *password,
+                          juice_logger_t *logger) {
 	if (!msg->has_integrity)
 		return false;
 
@@ -1050,7 +1071,7 @@ bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, con
 		return false;
 
 	uint8_t key[MAX_HMAC_KEY_LEN];
-	size_t key_len = generate_hmac_key(msg, password, key);
+	size_t key_len = generate_hmac_key(msg, password, key, logger);
 
 	bool success = false;
 	uint8_t *begin = buf;
@@ -1077,7 +1098,7 @@ bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, con
 
 			const uint8_t *expected_hmac = attr->value;
 			if (const_time_memcmp(hmac, expected_hmac, HMAC_SHA1_SIZE) != 0) {
-				JLOG_DEBUG("STUN message integrity SHA1 check failed");
+				JLOG_DEBUG(logger, "STUN message integrity SHA1 check failed");
 				return false;
 			}
 
@@ -1096,7 +1117,7 @@ bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, con
 
 			const uint8_t *expected_hmac = attr->value;
 			if (const_time_memcmp(hmac, expected_hmac, HMAC_SHA256_SIZE) != 0) {
-				JLOG_DEBUG("STUN message integrity SHA256 check failed");
+				JLOG_DEBUG(logger, "STUN message integrity SHA256 check failed");
 				return false;
 			}
 
@@ -1114,7 +1135,7 @@ bool stun_check_integrity(void *buf, size_t size, const stun_message_t *msg, con
 	if (!success)
 		return false;
 
-	JLOG_VERBOSE("STUN message integrity check succeeded");
+	JLOG_VERBOSE(logger, "STUN message integrity check succeeded");
 	return true;
 }
 
@@ -1191,11 +1212,12 @@ const char *stun_get_error_reason(unsigned int code) {
 	}
 }
 
-JUICE_EXPORT int _juice_stun_read(void *data, size_t size, stun_message_t *msg) {
-	return stun_read(data, size, msg);
+JUICE_EXPORT int _juice_stun_read(void *data, size_t size, stun_message_t *msg,
+                                  juice_logger_t *logger) {
+	return stun_read(data, size, msg, logger);
 }
 
 JUICE_EXPORT bool _juice_stun_check_integrity(void *buf, size_t size, const stun_message_t *msg,
-                                              const char *password) {
-	return stun_check_integrity(buf, size, msg, password);
+                                              const char *password, juice_logger_t *logger) {
+	return stun_check_integrity(buf, size, msg, password, logger);
 }

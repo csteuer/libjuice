@@ -19,14 +19,15 @@
 #ifndef JUICE_ADDR_H
 #define JUICE_ADDR_H
 
+#include "log.h"
 #include "socket.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 
-socklen_t addr_get_len(const struct sockaddr *sa);
-uint16_t addr_get_port(const struct sockaddr *sa);
-int addr_set_port(struct sockaddr *sa, uint16_t port);
+socklen_t addr_get_len(const struct sockaddr *sa, juice_logger_t *logger);
+uint16_t addr_get_port(const struct sockaddr *sa, juice_logger_t *logger);
+int addr_set_port(struct sockaddr *sa, uint16_t port, juice_logger_t *logger);
 bool addr_is_any(struct sockaddr *sa);
 bool addr_is_local(struct sockaddr *sa);
 bool addr_is_temp_inet6(struct sockaddr *sa);
@@ -40,7 +41,8 @@ typedef struct addr_record {
 	socklen_t len;
 } addr_record_t;
 
-int addr_resolve(const char *hostname, const char *service, addr_record_t *records, size_t count);
+int addr_resolve(const char *hostname, const char *service, addr_record_t *records, size_t count,
+                 juice_logger_t *logger);
 
 bool addr_record_is_equal(const addr_record_t *a, const addr_record_t *b, bool compare_ports);
 unsigned long addr_record_hash(const addr_record_t *record, bool with_port);

@@ -17,35 +17,34 @@
  */
 
 #include "addr.h"
-#include "log.h"
 
 #include <string.h>
 
-socklen_t addr_get_len(const struct sockaddr *sa) {
+socklen_t addr_get_len(const struct sockaddr *sa, juice_logger_t *logger) {
 	switch (sa->sa_family) {
 	case AF_INET:
 		return sizeof(struct sockaddr_in);
 	case AF_INET6:
 		return sizeof(struct sockaddr_in6);
 	default:
-		JLOG_WARN("Unknown address family %hu", sa->sa_family);
+		JLOG_WARN(logger, "Unknown address family %hu", sa->sa_family);
 		return 0;
 	}
 }
 
-uint16_t addr_get_port(const struct sockaddr *sa) {
+uint16_t addr_get_port(const struct sockaddr *sa, juice_logger_t *logger) {
 	switch (sa->sa_family) {
 	case AF_INET:
 		return ntohs(((struct sockaddr_in *)sa)->sin_port);
 	case AF_INET6:
 		return ntohs(((struct sockaddr_in6 *)sa)->sin6_port);
 	default:
-		JLOG_WARN("Unknown address family %hu", sa->sa_family);
+		JLOG_WARN(logger, "Unknown address family %hu", sa->sa_family);
 		return 0;
 	}
 }
 
-int addr_set_port(struct sockaddr *sa, uint16_t port) {
+int addr_set_port(struct sockaddr *sa, uint16_t port, juice_logger_t *logger) {
 	switch (sa->sa_family) {
 	case AF_INET:
 		((struct sockaddr_in *)sa)->sin_port = htons(port);
@@ -54,7 +53,7 @@ int addr_set_port(struct sockaddr *sa, uint16_t port) {
 		((struct sockaddr_in6 *)sa)->sin6_port = htons(port);
 		return 0;
 	default:
-		JLOG_WARN("Unknown address family %hu", sa->sa_family);
+		JLOG_WARN(logger, "Unknown address family %hu", sa->sa_family);
 		return -1;
 	}
 }
@@ -238,7 +237,8 @@ unsigned long addr_hash(const struct sockaddr *sa, bool with_port) {
 	return hash;
 }
 
-int addr_resolve(const char *hostname, const char *service, addr_record_t *records, size_t count) {
+int addr_resolve(const char *hostname, const char *service, addr_record_t *records, size_t count,
+                 juice_logger_t *logger) {
 	addr_record_t *end = records + count;
 
 	struct addrinfo hints;
@@ -249,7 +249,7 @@ int addr_resolve(const char *hostname, const char *service, addr_record_t *recor
 	hints.ai_flags = AI_ADDRCONFIG;
 	struct addrinfo *ai_list = NULL;
 	if (getaddrinfo(hostname, service, &hints, &ai_list)) {
-		JLOG_WARN("Address resolution failed for %s:%s", hostname, service);
+		JLOG_WARN(logger, "Address resolution failed for %s:%s", hostname, service);
 		return -1;
 	}
 
@@ -271,7 +271,7 @@ int addr_resolve(const char *hostname, const char *service, addr_record_t *recor
 
 bool addr_record_is_equal(const addr_record_t *a, const addr_record_t *b, bool compare_ports) {
 	return addr_is_equal((const struct sockaddr *)&a->addr, (const struct sockaddr *)&b->addr,
-	                     compare_ports);
+	                    compare_ports);
 }
 
 unsigned long addr_record_hash(const addr_record_t *record, bool with_port) {

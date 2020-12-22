@@ -48,8 +48,6 @@ static void on_recv1(juice_agent_t *agent, const char *data, size_t size, void *
 static void on_recv2(juice_agent_t *agent, const char *data, size_t size, void *user_ptr);
 
 int test_turn() {
-	juice_set_log_level(JUICE_LOG_LEVEL_DEBUG);
-
 	// Agent 1: Create agent
 	juice_config_t config1;
 	memset(&config1, 0, sizeof(config1));
@@ -72,6 +70,7 @@ int test_turn() {
 	config1.user_ptr = NULL;
 
 	agent1 = juice_create(&config1);
+	juice_set_log_level(agent1, JUICE_LOG_LEVEL_DEBUG);
 
 	// Agent 2: Create agent
 	juice_config_t config2;
@@ -88,6 +87,7 @@ int test_turn() {
 	config2.user_ptr = NULL;
 
 	agent2 = juice_create(&config2);
+	juice_set_log_level(agent2, JUICE_LOG_LEVEL_DEBUG);
 
 	// Agent 1: Generate local description
 	char sdp1[JUICE_MAX_SDP_STRING_LEN];

@@ -68,6 +68,23 @@ typedef struct juice_turn_server {
 	uint16_t port;
 } juice_turn_server_t;
 
+typedef enum {
+	JUICE_LOG_LEVEL_VERBOSE,
+	JUICE_LOG_LEVEL_DEBUG,
+	JUICE_LOG_LEVEL_INFO,
+	JUICE_LOG_LEVEL_WARN,
+	JUICE_LOG_LEVEL_ERROR,
+	JUICE_LOG_LEVEL_FATAL,
+	JUICE_LOG_LEVEL_NONE
+} juice_log_level_t;
+
+typedef void (*juice_log_cb_t)(juice_log_level_t level, const char *message, void *user_ptr);
+
+typedef struct juice_log_config {
+	juice_log_cb_t log_cb;
+	void *user_ptr;
+} juice_log_config_t;
+
 typedef struct juice_config {
 	const char *stun_server_host;
 	uint16_t stun_server_port;
@@ -85,6 +102,7 @@ typedef struct juice_config {
 
 	void *user_ptr;
 
+	juice_log_config_t logging;
 } juice_config_t;
 
 JUICE_EXPORT juice_agent_t *juice_create(const juice_config_t *config);
@@ -103,7 +121,6 @@ JUICE_EXPORT int juice_get_selected_candidates(juice_agent_t *agent, char *local
 JUICE_EXPORT int juice_get_selected_addresses(juice_agent_t *agent, char *local, size_t local_size,
                                               char *remote, size_t remote_size);
 JUICE_EXPORT const char *juice_state_to_string(juice_state_t state);
-
 
 // ICE server
 
@@ -131,6 +148,7 @@ typedef struct juice_server_config {
 
 	const char *realm;
 
+	juice_log_config_t logging;
 } juice_server_config_t;
 
 JUICE_EXPORT juice_server_t *juice_server_create(const juice_server_config_t *config);
@@ -138,23 +156,9 @@ JUICE_EXPORT void juice_server_destroy(juice_server_t *server);
 
 JUICE_EXPORT uint16_t juice_server_get_port(juice_server_t *server);
 
-
 // Logging
 
-typedef enum {
-	JUICE_LOG_LEVEL_VERBOSE,
-	JUICE_LOG_LEVEL_DEBUG,
-	JUICE_LOG_LEVEL_INFO,
-	JUICE_LOG_LEVEL_WARN,
-	JUICE_LOG_LEVEL_ERROR,
-	JUICE_LOG_LEVEL_FATAL,
-	JUICE_LOG_LEVEL_NONE
-} juice_log_level_t;
-
-typedef void (*juice_log_cb_t)(juice_log_level_t level, const char *message);
-
-JUICE_EXPORT void juice_set_log_level(juice_log_level_t level);
-JUICE_EXPORT void juice_set_log_handler(juice_log_cb_t cb);
+JUICE_EXPORT void juice_set_log_level(juice_agent_t *agent, juice_log_level_t level);
 
 #ifdef __cplusplus
 }

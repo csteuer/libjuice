@@ -58,7 +58,7 @@ bool is_channel_data(const void *data, size_t size);
 bool is_valid_channel(uint16_t channel);
 
 int turn_wrap_channel_data(char *buffer, size_t size, const char *data, size_t data_size,
-                           uint16_t channel);
+                           uint16_t channel, juice_logger_t *logger);
 
 // TURN state map
 
@@ -87,35 +87,39 @@ typedef struct turn_map {
 	int transaction_ids_count;
 } turn_map_t;
 
-int turn_init_map(turn_map_t *map, int size);
+int turn_init_map(turn_map_t *map, int size, juice_logger_t *logger);
 void turn_destroy_map(turn_map_t *map);
 
 bool turn_set_permission(turn_map_t *map, const uint8_t *transaction_id,
                          const addr_record_t *record, // record may be NULL
-                         timediff_t duration);
-bool turn_has_permission(turn_map_t *map, const addr_record_t *record);
+                         timediff_t duration, juice_logger_t *logger);
+bool turn_has_permission(turn_map_t *map, const addr_record_t *record, juice_logger_t *logger);
 
 bool turn_bind_channel(turn_map_t *map, const addr_record_t *record,
                        const uint8_t *transaction_id, // transaction_id may be NULL
-                       uint16_t channel, timediff_t duration);
+                       uint16_t channel, timediff_t duration, juice_logger_t *logger);
 bool turn_bind_random_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
-                              timediff_t duration);
+                              timediff_t duration, juice_logger_t *logger);
 bool turn_bind_current_channel(turn_map_t *map, const uint8_t *transaction_id,
                                const addr_record_t *record, // record may be NULL
-                               timediff_t duration);
-bool turn_get_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel);
-bool turn_get_bound_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel);
-bool turn_find_channel(turn_map_t *map, uint16_t channel, addr_record_t *record);
-bool turn_find_bound_channel(turn_map_t *map, uint16_t channel, addr_record_t *record);
+                               timediff_t duration, juice_logger_t *logger);
+bool turn_get_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
+                      juice_logger_t *logger);
+bool turn_get_bound_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
+                            juice_logger_t *logger);
+bool turn_find_channel(turn_map_t *map, uint16_t channel, addr_record_t *record,
+                       juice_logger_t *logger);
+bool turn_find_bound_channel(turn_map_t *map, uint16_t channel, addr_record_t *record,
+                             juice_logger_t *logger);
 
 bool turn_set_permission_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                        const uint8_t *transaction_id);
+                                        const uint8_t *transaction_id, juice_logger_t *logger);
 bool turn_set_channel_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                     const uint8_t *transaction_id);
+                                     const uint8_t *transaction_id, juice_logger_t *logger);
 bool turn_set_random_permission_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                               uint8_t *transaction_id);
+                                               uint8_t *transaction_id, juice_logger_t *logger);
 bool turn_set_random_channel_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                            uint8_t *transaction_id);
+                                            uint8_t *transaction_id, juice_logger_t *logger);
 bool turn_find_transaction_id(turn_map_t *map, const uint8_t *transaction_id,
                               addr_record_t *record);
 #endif

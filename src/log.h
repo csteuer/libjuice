@@ -20,18 +20,31 @@
 #define JUICE_LOG_H
 
 #include "juice.h"
+#include "thread.h"
 
 #include <stdarg.h>
 
-void juice_log_set_level(juice_log_level_t level);
+typedef struct juice_logger juice_logger_t;
 
-void juice_log_write(juice_log_level_t level, const char *file, int line, const char *fmt, ...);
+juice_logger_t *juice_logger_create(const juice_log_config_t *config);
+void juice_logger_destroy(juice_logger_t *logger);
 
-#define JLOG_VERBOSE(...) juice_log_write(JUICE_LOG_LEVEL_VERBOSE, __FILE__, __LINE__, __VA_ARGS__)
-#define JLOG_DEBUG(...) juice_log_write(JUICE_LOG_LEVEL_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
-#define JLOG_INFO(...) juice_log_write(JUICE_LOG_LEVEL_INFO, __FILE__, __LINE__, __VA_ARGS__)
-#define JLOG_WARN(...) juice_log_write(JUICE_LOG_LEVEL_WARN, __FILE__, __LINE__, __VA_ARGS__)
-#define JLOG_ERROR(...) juice_log_write(JUICE_LOG_LEVEL_ERROR, __FILE__, __LINE__, __VA_ARGS__)
-#define JLOG_FATAL(...) juice_log_write(JUICE_LOG_LEVEL_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+void juice_logger_set_log_level(juice_logger_t *logger, juice_log_level_t level);
+
+void juice_log_write(juice_logger_t *logger, juice_log_level_t level, const char *file, int line,
+                     const char *fmt, ...);
+
+#define JLOG_VERBOSE(logger, ...)                                                                  \
+	juice_log_write(logger, JUICE_LOG_LEVEL_VERBOSE, __FILE__, __LINE__, __VA_ARGS__)
+#define JLOG_DEBUG(logger, ...)                                                                    \
+	juice_log_write(logger, JUICE_LOG_LEVEL_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
+#define JLOG_INFO(logger, ...)                                                                     \
+	juice_log_write(logger, JUICE_LOG_LEVEL_INFO, __FILE__, __LINE__, __VA_ARGS__)
+#define JLOG_WARN(logger, ...)                                                                     \
+	juice_log_write(logger, JUICE_LOG_LEVEL_WARN, __FILE__, __LINE__, __VA_ARGS__)
+#define JLOG_ERROR(logger, ...)                                                                    \
+	juice_log_write(logger, JUICE_LOG_LEVEL_ERROR, __FILE__, __LINE__, __VA_ARGS__)
+#define JLOG_FATAL(logger, ...)                                                                    \
+	juice_log_write(logger, JUICE_LOG_LEVEL_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
 #endif // JUICE_LOG_H
