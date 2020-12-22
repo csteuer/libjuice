@@ -17,7 +17,6 @@
  */
 
 #include "ice.h"
-#include "log.h"
 #include "random.h"
 
 #include <assert.h>
@@ -42,7 +41,8 @@ static bool match_prefix(const char *str, const char *prefix, const char **end) 
 	return *end != str || !*prefix;
 }
 
-static int parse_sdp_line(const char *line, ice_description_t *description) {
+static int parse_sdp_line(const char *line, ice_description_t *description,
+                          juice_logger_t *logger) {
 	const char *arg;
 	if (match_prefix(line, "a=ice-ufrag:", &arg)) {
 		sscanf(arg, "%256s", description->ice_ufrag);
@@ -57,14 +57,15 @@ static int parse_sdp_line(const char *line, ice_description_t *description) {
 		return 0;
 	}
 	ice_candidate_t candidate;
-	if (ice_parse_candidate_sdp(line, &candidate) == 0) {
-		ice_add_candidate(&candidate, description);
+	if (ice_parse_candidate_sdp(line, &candidate, logger) == 0) {
+		ice_add_candidate(&candidate, description, logger);
 		return 0;
 	}
 	return ICE_PARSE_IGNORED;
 }
 
-static int parse_sdp_candidate(const char *line, ice_candidate_t *candidate) {
+static int parse_sdp_candidate(const char *line, ice_candidate_t *candidate,
+                               juice_logger_t *logger) {
 	memset(candidate, 0, sizeof(*candidate));
 
 	line = skip_prefix(line, "a=");
@@ -75,7 +76,7 @@ static int parse_sdp_candidate(const char *line, ice_candidate_t *candidate) {
 	if (sscanf(line, "%32s %u %32s %u %256s %32s typ %32s", candidate->foundation,
 	           &candidate->component, transport, &candidate->priority, candidate->hostname,
 	           candidate->service, type) != 7) {
-		JLOG_WARN("Failed to parse candidate: %s", line);
+		JLOG_WARN(logger, "Failed to parse candidate: %s", line);
 		return ICE_PARSE_ERROR;
 	}
 
@@ -92,19 +93,19 @@ static int parse_sdp_candidate(const char *line, ice_candidate_t *candidate) {
 	else if (strcmp(type, "relay") == 0)
 		candidate->type = ICE_CANDIDATE_TYPE_RELAYED;
 	else {
-		JLOG_WARN("Ignoring candidate with unknown type \"%s\"", type);
+		JLOG_WARN(logger, "Ignoring candidate with unknown type \"%s\"", type);
 		return ICE_PARSE_IGNORED;
 	}
 
 	if (strcmp(transport, "UDP") != 0) {
-		JLOG_WARN("Ignoring candidate with transport %s", transport);
+		JLOG_WARN(logger, "Ignoring candidate with transport %s", transport);
 		return ICE_PARSE_IGNORED;
 	}
 
 	return 0;
 }
 
-int ice_parse_sdp(const char *sdp, ice_description_t *description) {
+int ice_parse_sdp(const char *sdp, ice_description_t *description, juice_logger_t *logger) {
 	memset(description, 0, sizeof(*description));
 	description->candidates_count = 0;
 	description->finished = false;
@@ -115,7 +116,7 @@ int ice_parse_sdp(const char *sdp, ice_description_t *description) {
 		if (*sdp == '\n') {
 			if (size) {
 				buffer[size++] = '\0';
-				parse_sdp_line(buffer, description);
+				parse_sdp_line(buffer, description, logger);
 				size = 0;
 			}
 		} else if (*sdp != '\r' && size + 1 < BUFFER_SIZE) {
@@ -125,37 +126,38 @@ int ice_parse_sdp(const char *sdp, ice_description_t *description) {
 	}
 	ice_sort_candidates(description);
 
-	JLOG_DEBUG("Parsed remote description: ufrag=\"%s\", pwd=\"%s\", candidates=%d",
+	JLOG_DEBUG(logger, "Parsed remote description: ufrag=\"%s\", pwd=\"%s\", candidates=%d",
 	           description->ice_ufrag, description->ice_pwd, description->candidates_count);
 
 	return *description->ice_ufrag && *description->ice_pwd ? 0 : ICE_PARSE_ERROR;
 }
 
-int ice_parse_candidate_sdp(const char *line, ice_candidate_t *candidate) {
+int ice_parse_candidate_sdp(const char *line, ice_candidate_t *candidate, juice_logger_t *logger) {
 	const char *arg;
 	if (match_prefix(line, "a=candidate:", &arg)) {
-		int ret = parse_sdp_candidate(line, candidate);
+		int ret = parse_sdp_candidate(line, candidate, logger);
 		if (ret < 0)
 			return ret;
-		ice_resolve_candidate(candidate, ICE_RESOLVE_MODE_SIMPLE);
+		ice_resolve_candidate(candidate, ICE_RESOLVE_MODE_SIMPLE, logger);
 		return 0;
 	}
 	return ICE_PARSE_ERROR;
 }
 
-int ice_create_local_description(ice_description_t *description) {
+int ice_create_local_description(ice_description_t *description, juice_logger_t *logger) {
 	memset(description, 0, sizeof(*description));
-	juice_random_str64(description->ice_ufrag, 4 + 1);
-	juice_random_str64(description->ice_pwd, 22 + 1);
+	juice_random_str64(description->ice_ufrag, 4 + 1, logger);
+	juice_random_str64(description->ice_pwd, 22 + 1, logger);
 	description->candidates_count = 0;
 	description->finished = false;
-	JLOG_DEBUG("Created local description: ufrag=\"%s\", pwd=\"%s\"", description->ice_ufrag,
-	           description->ice_pwd);
+	JLOG_DEBUG(logger, "Created local description: ufrag=\"%s\", pwd=\"%s\"",
+	           description->ice_ufrag, description->ice_pwd);
 	return 0;
 }
 
 int ice_create_local_candidate(ice_candidate_type_t type, int component,
-                               const addr_record_t *record, ice_candidate_t *candidate) {
+                               const addr_record_t *record, ice_candidate_t *candidate,
+                               juice_logger_t *logger) {
 	memset(candidate, 0, sizeof(*candidate));
 	candidate->type = type;
 	candidate->component = component;
@@ -167,13 +169,14 @@ int ice_create_local_candidate(ice_candidate_type_t type, int component,
 
 	if (getnameinfo((struct sockaddr *)&record->addr, record->len, candidate->hostname, 256,
 	                candidate->service, 32, NI_NUMERICHOST | NI_NUMERICSERV | NI_DGRAM)) {
-		JLOG_ERROR("getnameinfo failed");
+		JLOG_ERROR(logger, "getnameinfo failed");
 		return -1;
 	}
 	return 0;
 }
 
-int ice_resolve_candidate(ice_candidate_t *candidate, ice_resolve_mode_t mode) {
+int ice_resolve_candidate(ice_candidate_t *candidate, ice_resolve_mode_t mode,
+                          juice_logger_t *logger) {
 	struct addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -184,7 +187,8 @@ int ice_resolve_candidate(ice_candidate_t *candidate, ice_resolve_mode_t mode) {
 		hints.ai_flags |= AI_NUMERICHOST | AI_NUMERICSERV;
 	struct addrinfo *ai_list = NULL;
 	if (getaddrinfo(candidate->hostname, candidate->service, &hints, &ai_list)) {
-		JLOG_INFO("Failed to resolve address: %s:%s", candidate->hostname, candidate->service);
+		JLOG_INFO(logger, "Failed to resolve address: %s:%s", candidate->hostname,
+		          candidate->service);
 		candidate->resolved.len = 0;
 		return -1;
 	}
@@ -199,12 +203,13 @@ int ice_resolve_candidate(ice_candidate_t *candidate, ice_resolve_mode_t mode) {
 	return 0;
 }
 
-int ice_add_candidate(ice_candidate_t *candidate, ice_description_t *description) {
+int ice_add_candidate(ice_candidate_t *candidate, ice_description_t *description,
+                      juice_logger_t *logger) {
 	if (candidate->type == ICE_CANDIDATE_TYPE_UNKNOWN)
 		return -1;
 
 	if (description->candidates_count >= ICE_MAX_CANDIDATES_COUNT) {
-		JLOG_WARN("Description already has the maximum number of candidates");
+		JLOG_WARN(logger, "Description already has the maximum number of candidates");
 		return -1;
 	}
 
@@ -250,7 +255,8 @@ ice_candidate_t *ice_find_candidate_from_addr(ice_description_t *description,
 	return NULL;
 }
 
-int ice_generate_sdp(const ice_description_t *description, char *buffer, size_t size) {
+int ice_generate_sdp(const ice_description_t *description, char *buffer, size_t size,
+                     juice_logger_t *logger) {
 	if (!*description->ice_ufrag || !*description->ice_pwd)
 		return -1;
 
@@ -272,7 +278,7 @@ int ice_generate_sdp(const ice_description_t *description, char *buffer, size_t 
 			    candidate->type == ICE_CANDIDATE_TYPE_PEER_REFLEXIVE)
 				continue;
 			char tmp[BUFFER_SIZE];
-			if (ice_generate_candidate_sdp(candidate, tmp, BUFFER_SIZE) < 0)
+			if (ice_generate_candidate_sdp(candidate, tmp, BUFFER_SIZE, logger) < 0)
 				continue;
 			ret = snprintf(begin, end - begin, "%s\r\n", tmp);
 		} else { // i == description->candidates_count + 1
@@ -289,7 +295,8 @@ int ice_generate_sdp(const ice_description_t *description, char *buffer, size_t 
 	return (int)len;
 }
 
-int ice_generate_candidate_sdp(const ice_candidate_t *candidate, char *buffer, size_t size) {
+int ice_generate_candidate_sdp(const ice_candidate_t *candidate, char *buffer, size_t size,
+                               juice_logger_t *logger) {
 	const char *type = NULL;
 	const char *suffix = NULL;
 	switch (candidate->type) {
@@ -308,7 +315,7 @@ int ice_generate_candidate_sdp(const ice_candidate_t *candidate, char *buffer, s
 		suffix = "raddr 0.0.0.0 rport 0"; // This is needed for compatibility with Firefox
 		break;
 	default:
-		JLOG_ERROR("Unknown candidate type");
+		JLOG_ERROR(logger, "Unknown candidate type");
 		return -1;
 	}
 	return snprintf(buffer, size, "a=candidate:%s %u UDP %u %s %s typ %s%s%s",
@@ -318,9 +325,10 @@ int ice_generate_candidate_sdp(const ice_candidate_t *candidate, char *buffer, s
 }
 
 int ice_create_candidate_pair(ice_candidate_t *local, ice_candidate_t *remote, bool is_controlling,
-                              ice_candidate_pair_t *pair) { // local or remote might be NULL
-	if (local && remote && local->resolved.addr.ss_family != remote->resolved.addr.ss_family) {
-		JLOG_ERROR("Mismatching candidates address families");
+                              ice_candidate_pair_t *pair,
+                              juice_logger_t *logger) { // local or remote might be NULL
+	if(local && remote && local->resolved.addr.ss_family != remote->resolved.addr.ss_family) {
+		JLOG_ERROR(logger, "Mismatching candidates address families");
 		return -1;
 	}
 
@@ -340,12 +348,12 @@ int ice_update_candidate_pair(ice_candidate_pair_t *pair, bool is_controlling) {
 	    pair->local
 	        ? pair->local->priority
 	        : ice_compute_priority(ICE_CANDIDATE_TYPE_HOST, pair->remote->resolved.addr.ss_family,
-	                               pair->remote->component);
+	                                                         pair->remote->component);
 	uint64_t remote_priority =
 	    pair->remote
 	        ? pair->remote->priority
 	        : ice_compute_priority(ICE_CANDIDATE_TYPE_HOST, pair->local->resolved.addr.ss_family,
-	                               pair->local->component);
+	                                                           pair->local->component);
 	uint64_t g = is_controlling ? local_priority : remote_priority;
 	uint64_t d = is_controlling ? remote_priority : local_priority;
 	uint64_t min = g < d ? g : d;

@@ -154,6 +154,8 @@ struct juice_agent {
 
 	mutex_t send_mutex;
 	int send_ds;
+
+	juice_logger_t *logger;
 };
 
 juice_agent_t *agent_create(const juice_config_t *config);

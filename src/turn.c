@@ -17,9 +17,9 @@
  */
 
 #include "turn.h"
+#include "log.h"
 #include "random.h"
 #include "socket.h"
-#include "log.h"
 
 #include <string.h>
 
@@ -32,7 +32,7 @@ static bool memory_is_zero(const void *data, size_t size) {
 	return true;
 }
 
-static uint16_t random_channel_number() {
+static uint16_t random_channel_number(juice_logger_t *logger) {
 	/*
 	 * RFC 8656 12. Channels
 	 * The ChannelData message (see Section 12.4) starts with a two-byte
@@ -51,7 +51,7 @@ static uint16_t random_channel_number() {
 	 *   +------------------------+--------------------------------------+
 	 */
 	uint16_t r;
-	juice_random(&r, 2);
+	juice_random(&r, 2, logger);
 	return 0x4000 | (r & 0x0FFF);
 }
 
@@ -66,18 +66,18 @@ bool is_channel_data(const void *data, size_t size) {
 bool is_valid_channel(uint16_t channel) { return channel >= 0x4000; }
 
 int turn_wrap_channel_data(char *buffer, size_t size, const char *data, size_t data_size,
-                           uint16_t channel) {
+                           uint16_t channel, juice_logger_t *logger) {
 	if (!is_valid_channel(channel)) {
-		JLOG_WARN("Invalid channel number: 0x%hX", channel);
+		JLOG_WARN(logger, "Invalid channel number: 0x%hX", channel);
 		return -1;
 	}
 	if (data_size >= 65536) {
-		JLOG_WARN("ChannelData is too long, size=%zu", size);
+		JLOG_WARN(logger, "ChannelData is too long, size=%zu", size);
 		return -1;
 	}
 	if (size < sizeof(struct channel_data_header) + data_size) {
-		JLOG_WARN("Buffer is too small to add ChannelData header, size=%zu, needed=%zu", size,
-		           sizeof(struct channel_data_header) + data_size);
+		JLOG_WARN(logger, "Buffer is too small to add ChannelData header, size=%zu, needed=%zu",
+		          size, sizeof(struct channel_data_header) + data_size);
 		return -1;
 	}
 
@@ -141,30 +141,31 @@ static void remove_ordered_transaction_id(turn_map_t *map, const uint8_t *transa
 }
 /*
 static void remove_ordered_channel(turn_map_t *map, uint16_t channel) {
-	int pos = find_ordered_channel(map, channel);
-	if (pos < map->channels_count) {
-		memmove(map->ordered_channels + pos, map->ordered_channels + pos + 1,
-		        (map->channels_count - (pos + 1)) * sizeof(turn_entry_t *));
-		map->channels_count--;
-	}
+    int pos = find_ordered_channel(map, channel);
+    if (pos < map->channels_count) {
+        memmove(map->ordered_channels + pos, map->ordered_channels + pos + 1,
+                (map->channels_count - (pos + 1)) * sizeof(turn_entry_t *));
+        map->channels_count--;
+    }
 }
 
 static void delete_entry(turn_map_t *map, turn_entry_t *entry) {
-	if (entry->type == TURN_ENTRY_TYPE_EMPTY || entry->type == TURN_ENTRY_TYPE_DELETED)
-		return;
+    if (entry->type == TURN_ENTRY_TYPE_EMPTY || entry->type == TURN_ENTRY_TYPE_DELETED)
+        return;
 
-	if (!memory_is_zero(entry->transaction_id, STUN_TRANSACTION_ID_SIZE))
-		remove_ordered_transaction_id(map, entry->transaction_id);
+    if (!memory_is_zero(entry->transaction_id, STUN_TRANSACTION_ID_SIZE))
+        remove_ordered_transaction_id(map, entry->transaction_id);
 
-	if (entry->type == TURN_ENTRY_TYPE_CHANNEL && entry->channel)
-		remove_ordered_channel(map, entry->channel);
+    if (entry->type == TURN_ENTRY_TYPE_CHANNEL && entry->channel)
+        remove_ordered_channel(map, entry->channel);
 
-	memset(entry, 0, sizeof(*entry));
-	entry->type = TURN_ENTRY_TYPE_DELETED;
+    memset(entry, 0, sizeof(*entry));
+    entry->type = TURN_ENTRY_TYPE_DELETED;
 }
 */
 static turn_entry_t *find_entry(turn_map_t *map, const addr_record_t *record,
-                                turn_entry_type_t type, bool allow_deleted) {
+                                turn_entry_type_t type, bool allow_deleted,
+                                juice_logger_t *logger) {
 	unsigned long key = (addr_record_hash(record, false) + (int)type) % map->map_size;
 	unsigned long pos = key;
 	while (true) {
@@ -178,7 +179,7 @@ static turn_entry_t *find_entry(turn_map_t *map, const addr_record_t *record,
 
 		pos = (pos + 1) % map->map_size;
 		if (pos == key) {
-			JLOG_VERBOSE("TURN map is full");
+			JLOG_VERBOSE(logger, "TURN map is full");
 			return NULL;
 		}
 	}
@@ -186,10 +187,11 @@ static turn_entry_t *find_entry(turn_map_t *map, const addr_record_t *record,
 }
 
 static bool update_timestamp(turn_map_t *map, turn_entry_type_t type, const uint8_t *transaction_id,
-                             const addr_record_t *record, timediff_t duration) {
+                             const addr_record_t *record, timediff_t duration,
+                             juice_logger_t *logger) {
 	turn_entry_t *entry;
 	if (record) {
-		entry = find_entry(map, record, type, true);
+		entry = find_entry(map, record, type, true, logger);
 		if (!entry)
 			return false;
 
@@ -222,7 +224,7 @@ static bool update_timestamp(turn_map_t *map, turn_entry_type_t type, const uint
 	return true;
 }
 
-int turn_init_map(turn_map_t *map, int size) {
+int turn_init_map(turn_map_t *map, int size, juice_logger_t *logger) {
 	memset(map, 0, sizeof(*map));
 
 	map->map_size = size * 2;
@@ -234,7 +236,7 @@ int turn_init_map(turn_map_t *map, int size) {
 	map->ordered_transaction_ids = calloc(sizeof(turn_entry_t *), map->map_size);
 
 	if (!map->map || !map->ordered_channels || !map->ordered_transaction_ids) {
-		JLOG_ERROR("Failed to allocate TURN map of size %d", size);
+		JLOG_ERROR(logger, "Failed to allocate TURN map of size %d", size);
 		turn_destroy_map(map);
 		return -1;
 	}
@@ -249,12 +251,13 @@ void turn_destroy_map(turn_map_t *map) {
 }
 
 bool turn_set_permission(turn_map_t *map, const uint8_t *transaction_id,
-                         const addr_record_t *record, timediff_t duration) {
-	return update_timestamp(map, TURN_ENTRY_TYPE_PERMISSION, transaction_id, record, duration);
+                         const addr_record_t *record, timediff_t duration, juice_logger_t *logger) {
+	return update_timestamp(map, TURN_ENTRY_TYPE_PERMISSION, transaction_id, record, duration,
+	                        logger);
 }
 
-bool turn_has_permission(turn_map_t *map, const addr_record_t *record) {
-	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_PERMISSION, false);
+bool turn_has_permission(turn_map_t *map, const addr_record_t *record, juice_logger_t *logger) {
+	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_PERMISSION, false, logger);
 	if (!entry || entry->type != TURN_ENTRY_TYPE_PERMISSION)
 		return false;
 
@@ -262,19 +265,19 @@ bool turn_has_permission(turn_map_t *map, const addr_record_t *record) {
 }
 
 bool turn_bind_channel(turn_map_t *map, const addr_record_t *record, const uint8_t *transaction_id,
-                       uint16_t channel, timediff_t duration) {
+                       uint16_t channel, timediff_t duration, juice_logger_t *logger) {
 	if (!is_valid_channel(channel)) {
-		JLOG_ERROR("Invalid channel number: 0x%hX", channel);
+		JLOG_ERROR(logger, "Invalid channel number: 0x%hX", channel);
 		return false;
 	}
 
-	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, true);
+	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, true, logger);
 	if (!entry)
 		return false;
 
 	if (entry->type == TURN_ENTRY_TYPE_CHANNEL && entry->channel) {
 		if (entry->channel != channel) {
-			JLOG_WARN("The record is already bound to a channel");
+			JLOG_WARN(logger, "The record is already bound to a channel");
 			return false;
 		}
 
@@ -286,7 +289,7 @@ bool turn_bind_channel(turn_map_t *map, const addr_record_t *record, const uint8
 	if (pos < map->channels_count) {
 		const turn_entry_t *other_entry = map->ordered_channels[pos];
 		if (other_entry->channel == channel) {
-			JLOG_WARN("The channel is already bound to a record");
+			JLOG_WARN(logger, "The channel is already bound to a record");
 			return false;
 		}
 	}
@@ -313,13 +316,13 @@ bool turn_bind_channel(turn_map_t *map, const addr_record_t *record, const uint8
 }
 
 bool turn_bind_random_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
-                              timediff_t duration) {
+                              timediff_t duration, juice_logger_t *logger) {
 	uint16_t c;
 	do {
-		c = random_channel_number();
-	} while (turn_find_channel(map, c, NULL));
+		c = random_channel_number(logger);
+	} while (turn_find_channel(map, c, NULL, logger));
 
-	if (!turn_bind_channel(map, record, NULL, c, duration))
+	if (!turn_bind_channel(map, record, NULL, c, duration, logger))
 		return false;
 
 	if (channel)
@@ -329,38 +332,42 @@ bool turn_bind_random_channel(turn_map_t *map, const addr_record_t *record, uint
 }
 
 bool turn_bind_current_channel(turn_map_t *map, const uint8_t *transaction_id,
-                               const addr_record_t *record, timediff_t duration) {
-	return update_timestamp(map, TURN_ENTRY_TYPE_CHANNEL, transaction_id, record, duration);
+                               const addr_record_t *record, timediff_t duration,
+                               juice_logger_t *logger) {
+	return update_timestamp(map, TURN_ENTRY_TYPE_CHANNEL, transaction_id, record, duration, logger);
 }
 
-bool turn_get_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel) {
-	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, false);
+bool turn_get_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
+                      juice_logger_t *logger) {
+	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, false, logger);
 	if (!entry || entry->type != TURN_ENTRY_TYPE_CHANNEL)
 		return false;
 
-	if(channel)
+	if (channel)
 		*channel = entry->channel;
 
 	return true;
 }
 
-bool turn_get_bound_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel) {
-	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, false);
+bool turn_get_bound_channel(turn_map_t *map, const addr_record_t *record, uint16_t *channel,
+                            juice_logger_t *logger) {
+	turn_entry_t *entry = find_entry(map, record, TURN_ENTRY_TYPE_CHANNEL, false, logger);
 	if (!entry || entry->type != TURN_ENTRY_TYPE_CHANNEL)
 		return false;
 
 	if (!entry->channel || current_timestamp() >= entry->timestamp)
 		return false;
 
-	if(channel)
+	if (channel)
 		*channel = entry->channel;
 
 	return true;
 }
 
-bool turn_find_channel(turn_map_t *map, uint16_t channel, addr_record_t *record) {
+bool turn_find_channel(turn_map_t *map, uint16_t channel, addr_record_t *record,
+                       juice_logger_t *logger) {
 	if (!is_valid_channel(channel)) {
-		JLOG_WARN("Invalid channel number: 0x%hX", channel);
+		JLOG_WARN(logger, "Invalid channel number: 0x%hX", channel);
 		return false;
 	}
 
@@ -378,9 +385,10 @@ bool turn_find_channel(turn_map_t *map, uint16_t channel, addr_record_t *record)
 	return true;
 }
 
-bool turn_find_bound_channel(turn_map_t *map, uint16_t channel, addr_record_t *record) {
+bool turn_find_bound_channel(turn_map_t *map, uint16_t channel, addr_record_t *record,
+                             juice_logger_t *logger) {
 	if (!is_valid_channel(channel)) {
-		JLOG_WARN("Invalid channel number: 0x%hX", channel);
+		JLOG_WARN(logger, "Invalid channel number: 0x%hX", channel);
 		return false;
 	}
 
@@ -399,11 +407,11 @@ bool turn_find_bound_channel(turn_map_t *map, uint16_t channel, addr_record_t *r
 }
 
 static bool set_transaction_id(turn_map_t *map, turn_entry_type_t type, const addr_record_t *record,
-                               const uint8_t *transaction_id) {
+                               const uint8_t *transaction_id, juice_logger_t *logger) {
 	if (type != TURN_ENTRY_TYPE_PERMISSION && type != TURN_ENTRY_TYPE_CHANNEL)
 		return false;
 
-	turn_entry_t *entry = find_entry(map, record, type, true);
+	turn_entry_t *entry = find_entry(map, record, type, true, logger);
 	if (!entry)
 		return false;
 
@@ -427,21 +435,23 @@ static bool set_transaction_id(turn_map_t *map, turn_entry_type_t type, const ad
 }
 
 static bool set_random_transaction_id(turn_map_t *map, turn_entry_type_t type,
-                                      const addr_record_t *record, uint8_t *transaction_id) {
-	turn_entry_t *entry = find_entry(map, record, type, false);
+                                      const addr_record_t *record, uint8_t *transaction_id,
+                                      juice_logger_t *logger) {
+	turn_entry_t *entry = find_entry(map, record, type, false, logger);
 	if (entry && entry->fresh_transaction_id) {
-		if (transaction_id)
+		if (transaction_id) {
 			memcpy(transaction_id, entry->transaction_id, STUN_TRANSACTION_ID_SIZE);
+		}
 
 		return true;
 	}
 
 	uint8_t tid[STUN_TRANSACTION_ID_SIZE];
 	do {
-		juice_random(tid, STUN_TRANSACTION_ID_SIZE);
+		juice_random(tid, STUN_TRANSACTION_ID_SIZE, logger);
 	} while (turn_find_transaction_id(map, tid, NULL));
 
-	if (!set_transaction_id(map, type, record, tid))
+	if (!set_transaction_id(map, type, record, tid, logger))
 		return false;
 
 	if (transaction_id)
@@ -451,23 +461,24 @@ static bool set_random_transaction_id(turn_map_t *map, turn_entry_type_t type,
 }
 
 bool turn_set_permission_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                        const uint8_t *transaction_id) {
-	return set_transaction_id(map, TURN_ENTRY_TYPE_PERMISSION, record, transaction_id);
+                                        const uint8_t *transaction_id, juice_logger_t *logger) {
+	return set_transaction_id(map, TURN_ENTRY_TYPE_PERMISSION, record, transaction_id, logger);
 }
 
 bool turn_set_channel_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                     const uint8_t *transaction_id) {
-	return set_transaction_id(map, TURN_ENTRY_TYPE_CHANNEL, record, transaction_id);
+                                     const uint8_t *transaction_id, juice_logger_t *logger) {
+	return set_transaction_id(map, TURN_ENTRY_TYPE_CHANNEL, record, transaction_id, logger);
 }
 
 bool turn_set_random_permission_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                               uint8_t *transaction_id) {
-	return set_random_transaction_id(map, TURN_ENTRY_TYPE_PERMISSION, record, transaction_id);
+                                               uint8_t *transaction_id, juice_logger_t *logger) {
+	return set_random_transaction_id(map, TURN_ENTRY_TYPE_PERMISSION, record, transaction_id,
+	                                 logger);
 }
 
 bool turn_set_random_channel_transaction_id(turn_map_t *map, const addr_record_t *record,
-                                            uint8_t *transaction_id) {
-	return set_random_transaction_id(map, TURN_ENTRY_TYPE_CHANNEL, record, transaction_id);
+                                            uint8_t *transaction_id, juice_logger_t *logger) {
+	return set_random_transaction_id(map, TURN_ENTRY_TYPE_CHANNEL, record, transaction_id, logger);
 }
 
 bool turn_find_transaction_id(turn_map_t *map, const uint8_t *transaction_id,

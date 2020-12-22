@@ -20,6 +20,7 @@
 #define JUICE_UDP_H
 
 #include "addr.h"
+#include "log.h"
 #include "socket.h"
 
 #include <stdint.h>
@@ -30,11 +31,11 @@ typedef struct udp_socket_config {
 	uint16_t port_end;
 } udp_socket_config_t;
 
-socket_t udp_create_socket(const udp_socket_config_t *config);
-int udp_set_diffserv(socket_t sock, int ds);
-uint16_t udp_get_port(socket_t sock);
-int udp_get_bound_addr(socket_t sock, addr_record_t *record);
-int udp_get_local_addr(socket_t sock, int family, addr_record_t *record); // family may be AF_UNSPEC
-int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count);
+socket_t udp_create_socket(const udp_socket_config_t *config, juice_logger_t *logger);
+int udp_set_diffserv(socket_t sock, int ds, juice_logger_t *logger);
+uint16_t udp_get_port(socket_t sock, juice_logger_t *logger);
+int udp_get_bound_addr(socket_t sock, addr_record_t *record, juice_logger_t *logger);
+int udp_get_local_addr(socket_t sock, int family, addr_record_t *record, juice_logger_t *logger); // family may be AF_UNSPEC
+int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count, juice_logger_t *logger);
 
 #endif // JUICE_UDP_H

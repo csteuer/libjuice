@@ -17,6 +17,7 @@
  */
 
 #include "log.h"
+#include "agent.h"
 #include "thread.h" // for mutexes
 
 #include <stdbool.h>
@@ -34,6 +35,17 @@
 
 #define BUFFER_SIZE 4096
 
+struct juice_logger {
+	mutex_t log_mutex;
+	volatile juice_log_cb_t log_cb;
+	void *user_ptr;
+#ifdef NO_ATOMICS
+	volatile juice_log_level_t log_level;
+#else
+	_Atomic(juice_log_level_t) log_level;
+#endif
+};
+
 static const char *log_level_names[] = {"VERBOSE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
 
 static const char *log_level_colors[] = {
@@ -45,14 +57,6 @@ static const char *log_level_colors[] = {
     "\x1B[97m\x1B[41m" // white on red
 };
 
-static mutex_t log_mutex = MUTEX_INITIALIZER;
-static volatile juice_log_cb_t log_cb = NULL;
-#ifdef NO_ATOMICS
-static volatile juice_log_level_t log_level = JUICE_LOG_LEVEL_WARN;
-#else
-static _Atomic(juice_log_level_t) log_level = JUICE_LOG_LEVEL_WARN;
-#endif
-
 static bool use_color(void) {
 #ifdef _WIN32
 	return false;
@@ -61,34 +65,53 @@ static bool use_color(void) {
 #endif
 }
 
-JUICE_EXPORT void juice_set_log_level(juice_log_level_t level) {
+juice_logger_t *juice_logger_create(const juice_log_config_t *config) {
+	juice_logger_t *logger = calloc(1, sizeof(juice_logger_t));
+
+	if (logger == NULL) {
+		return NULL;
+	}
+
+	mutex_init(&logger->log_mutex, 0);
+	logger->log_cb = config->log_cb;
+	logger->user_ptr = config->user_ptr;
 #ifdef NO_ATOMICS
-	mutex_lock(&log_mutex);
-	log_level = level;
-	mutex_unlock(&log_mutex);
+	logger->log_level = JUICE_LOG_LEVEL_WARN;
 #else
-	atomic_store(&log_level, level);
+	atomic_init(&logger->log_level, JUICE_LOG_LEVEL_WARN);
+#endif
+
+	return logger;
+}
+
+void juice_logger_destroy(juice_logger_t *logger) {
+	mutex_destroy(&logger->log_mutex);
+	free(logger);
+}
+
+void juice_logger_set_log_level(juice_logger_t *logger, juice_log_level_t level) {
+#ifdef NO_ATOMICS
+	mutex_lock(&logger->log_mutex);
+	logger->log_level = level;
+	mutex_unlock(&logger->log_mutex);
+#else
+	atomic_store(&logger->log_level, level);
 #endif
 }
 
-JUICE_EXPORT void juice_set_log_handler(juice_log_cb_t cb) {
-	mutex_lock(&log_mutex);
-	log_cb = cb;
-	mutex_unlock(&log_mutex);
-}
-
-void juice_log_write(juice_log_level_t level, const char *file, int line, const char *fmt, ...) {
+void juice_log_write(juice_logger_t *logger, juice_log_level_t level, const char *file, int line,
+                     const char *fmt, ...) {
 #ifdef NO_ATOMICS
-	mutex_lock(&log_mutex);
-	if (level < log_level) {
-		mutex_unlock(&log_mutex);
+	mutex_lock(&logger->log_mutex);
+	if (level < logger->log_level) {
+		mutex_unlock(&logger->log_mutex);
 		return;
 	}
 #else
-	if (level < atomic_load(&log_level) || level == JUICE_LOG_LEVEL_NONE)
+	if (level < atomic_load(&logger->log_level) || level == JUICE_LOG_LEVEL_NONE)
 		return;
 
-	mutex_lock(&log_mutex);
+	mutex_lock(&logger->log_mutex);
 #endif
 
 	const char *filename = file + strlen(file);
@@ -97,7 +120,7 @@ void juice_log_write(juice_log_level_t level, const char *file, int line, const 
 	if (filename != file)
 		++filename;
 
-	if (log_cb) {
+	if (logger->log_cb) {
 		char message[BUFFER_SIZE];
 		int len = snprintf(message, BUFFER_SIZE, "%s:%d: ", filename, line);
 		len = len >= 0 ? len : 0;
@@ -108,7 +131,7 @@ void juice_log_write(juice_log_level_t level, const char *file, int line, const 
 		va_end(args);
 
 		if (len >= 0)
-			log_cb(level, message);
+			logger->log_cb(level, message, logger->user_ptr);
 	} else {
 		time_t t = time(NULL);
 		struct tm *lt = localtime(&t);
@@ -132,5 +155,5 @@ void juice_log_write(juice_log_level_t level, const char *file, int line, const 
 		fprintf(stdout, "\n");
 		fflush(stdout);
 	}
-	mutex_unlock(&log_mutex);
+	mutex_unlock(&logger->log_mutex);
 }

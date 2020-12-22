@@ -111,7 +111,7 @@ JUICE_EXPORT int juice_send_diffserv(juice_agent_t *agent, const char *data, siz
 JUICE_EXPORT juice_state_t juice_get_state(juice_agent_t *agent) { return agent_get_state(agent); }
 
 JUICE_EXPORT int juice_get_selected_candidates(juice_agent_t *agent, char *local, size_t local_size,
-                                               char *remote, size_t remote_size) {
+                                              char *remote, size_t remote_size) {
 	if (!agent || (!local && local_size) || (!remote && remote_size))
 		return JUICE_ERR_INVALID;
 
@@ -119,10 +119,11 @@ JUICE_EXPORT int juice_get_selected_candidates(juice_agent_t *agent, char *local
 	if (agent_get_selected_candidate_pair(agent, &local_cand, &remote_cand))
 		return JUICE_ERR_NOT_AVAIL;
 
-	if (local_size && ice_generate_candidate_sdp(&local_cand, local, local_size) < 0)
+	if (local_size && ice_generate_candidate_sdp(&local_cand, local, local_size, agent->logger) < 0)
 		return JUICE_ERR_FAILED;
 
-	if (remote_size && ice_generate_candidate_sdp(&remote_cand, remote, remote_size) < 0)
+	if (remote_size &&
+	    ice_generate_candidate_sdp(&remote_cand, remote, remote_size, agent->logger) < 0)
 		return JUICE_ERR_FAILED;
 
 	return JUICE_ERR_SUCCESS;
@@ -190,4 +191,8 @@ JUICE_EXPORT uint16_t juice_server_get_port(juice_server_t *server) {
 	return server ? server_get_port(server) : 0;
 #endif
 	return 0;
+}
+
+JUICE_EXPORT void juice_set_log_level(juice_agent_t *agent, juice_log_level_t level) {
+	juice_logger_set_log_level(agent->logger, level);
 }

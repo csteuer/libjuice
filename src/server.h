@@ -73,6 +73,7 @@ typedef struct juice_server {
 	bool thread_stopped;
 	server_turn_alloc_t *allocs;
 	int allocs_count;
+	juice_logger_t *logger;
 } juice_server_t;
 
 juice_server_t *server_create(const juice_server_config_t *config);

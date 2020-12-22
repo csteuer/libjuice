@@ -21,9 +21,18 @@
 #include <stdint.h>
 #include <string.h>
 
-int test_stun(void) {
-	stun_message_t msg;
+int do_test_stun(juice_logger_t *logger);
 
+int test_stun(void) {
+	juice_log_config_t log_config;
+	juice_logger_t *logger = juice_logger_create(&log_config);
+	int ret = do_test_stun(logger);
+	juice_logger_destroy(logger);
+	return ret;
+}
+
+int do_test_stun(juice_logger_t *logger) {
+    stun_message_t msg;
 	uint8_t message1[] = {
 	    0x00, 0x01, 0x00, 0x58, // Request type and message length
 	    0x21, 0x12, 0xa4, 0x42, // Magic cookie
@@ -56,7 +65,7 @@ int test_stun(void) {
 
 	memset(&msg, 0, sizeof(msg));
 
-	if (_juice_stun_read(message1, sizeof(message1), &msg) <= 0)
+	if (_juice_stun_read(message1, sizeof(message1), &msg, logger) <= 0)
 		return -1;
 
 	if(msg.msg_class != STUN_CLASS_REQUEST || msg.msg_method != STUN_METHOD_BINDING)
@@ -74,7 +83,7 @@ int test_stun(void) {
 	if (!msg.has_integrity)
 		return -1;
 
-	if (!_juice_stun_check_integrity(message1, sizeof(message1), &msg, "VOkJxbRl1RmTxUk/WvJxBt"))
+	if (!_juice_stun_check_integrity(message1, sizeof(message1), &msg, "VOkJxbRl1RmTxUk/WvJxBt", logger))
 		return -1;
 
 	if(msg.error_code != 0)
@@ -128,7 +137,7 @@ int test_stun(void) {
 
 	memset(&msg, 0, sizeof(msg));
 
-	if (_juice_stun_read(message2, sizeof(message2), &msg) <= 0)
+	if (_juice_stun_read(message2, sizeof(message2), &msg, logger) <= 0)
 		return -1;
 
 	if(msg.msg_class != STUN_CLASS_REQUEST || msg.msg_method != STUN_METHOD_BINDING)
@@ -155,7 +164,7 @@ int test_stun(void) {
 	// Username is "<U+30DE><U+30C8><U+30EA><U+30C3><U+30AF><U+30B9>" or "マトリックス"
 	// aka "The Matrix" in Japanese
 	strcpy(msg.credentials.username, "マトリックス");
-	if (!_juice_stun_check_integrity(message2, sizeof(message2), &msg, "TheMatrIX"))
+	if (!_juice_stun_check_integrity(message2, sizeof(message2), &msg, "TheMatrIX", logger))
 		return -1;
 
 	if(msg.error_code != STUN_ERROR_INTERNAL_VALIDATION_FAILED)

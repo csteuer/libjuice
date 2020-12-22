@@ -17,6 +17,7 @@
  */
 
 #include "juice/juice.h"
+#include "log.h"
 
 #include <stdio.h>
 
@@ -33,8 +34,6 @@ int test_server(void);
 #endif
 
 int main(int argc, char **argv) {
-	juice_set_log_level(JUICE_LOG_LEVEL_WARN);
-
 	printf("\nRunning CRC32 implementation test...\n");
 	if (test_crc32()) {
 		fprintf(stderr, "CRC32 implementation test failed\n");
@@ -87,4 +86,3 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
-

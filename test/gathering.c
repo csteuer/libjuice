@@ -42,7 +42,6 @@ static void on_candidate(juice_agent_t *agent, const char *sdp, void *user_ptr);
 static void on_gathering_done(juice_agent_t *agent, void *user_ptr);
 
 int test_gathering() {
-	juice_set_log_level(JUICE_LOG_LEVEL_DEBUG);
 
 	// Create agent
 	juice_config_t config;

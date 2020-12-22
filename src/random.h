@@ -19,13 +19,15 @@
 #ifndef JUICE_RANDOM_H
 #define JUICE_RANDOM_H
 
+#include "log.h"
+
 #include <stdint.h>
 #include <stdlib.h>
 
-void juice_random(void *buf, size_t size);
-void juice_random_str64(char *buf, size_t size);
+void juice_random(void *buf, size_t size, juice_logger_t *logger);
+void juice_random_str64(char *buf, size_t size, juice_logger_t *logger);
 
-uint32_t juice_rand32(void);
-uint64_t juice_rand64(void);
+uint32_t juice_rand32(juice_logger_t *logger);
+uint64_t juice_rand64(juice_logger_t *logger);
 
 #endif // JUICE_RANDOM_H
