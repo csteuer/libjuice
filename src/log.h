@@ -26,8 +26,9 @@
 
 typedef struct juice_logger juice_logger_t;
 
-juice_logger_t *juice_logger_create(const juice_log_config_t *config);
-void juice_logger_destroy(juice_logger_t *logger);
+// Export for tests
+JUICE_EXPORT juice_logger_t *juice_logger_create(const juice_log_config_t *config);
+JUICE_EXPORT void juice_logger_destroy(juice_logger_t *logger);
 
 void juice_logger_set_log_level(juice_logger_t *logger, juice_log_level_t level);
 

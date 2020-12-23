@@ -65,6 +65,7 @@ static int random_bytes(void *buf, size_t size, juice_logger_t *logger) {
 static int random_bytes(void *buf, size_t size, juice_logger_t *logger) {
 	(void)buf;
 	(void)size;
+    (void)logger;
 	return -1;
 }
 #endif

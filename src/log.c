@@ -65,7 +65,7 @@ static bool use_color(void) {
 #endif
 }
 
-juice_logger_t *juice_logger_create(const juice_log_config_t *config) {
+JUICE_EXPORT juice_logger_t *juice_logger_create(const juice_log_config_t *config) {
 	juice_logger_t *logger = calloc(1, sizeof(juice_logger_t));
 
 	if (logger == NULL) {
@@ -84,7 +84,7 @@ juice_logger_t *juice_logger_create(const juice_log_config_t *config) {
 	return logger;
 }
 
-void juice_logger_destroy(juice_logger_t *logger) {
+JUICE_EXPORT void juice_logger_destroy(juice_logger_t *logger) {
 	mutex_destroy(&logger->log_mutex);
 	free(logger);
 }

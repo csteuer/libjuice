@@ -74,7 +74,7 @@ juice_agent_t *agent_create(const juice_config_t *config) {
 #ifdef _WIN32
 	WSADATA wsaData;
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData)) {
-		JLOG_FATAL("WSAStartup failed");
+		JLOG_FATAL(logger, "WSAStartup failed");
 		juice_logger_destroy(logger);
 		return NULL;
 	}
@@ -95,7 +95,7 @@ juice_agent_t *agent_create(const juice_config_t *config) {
 	agent->config = *config;
 
 	if (agent->config.stun_server_host) {
-		agent->config.stun_server_host = alloc_string_copy(agent->config.stun_server_host);
+	agent->config.stun_server_host = alloc_string_copy(agent->config.stun_server_host);
 		if (!agent->config.stun_server_host) {
 			JLOG_FATAL(logger, "alloc for STUN server host failed");
 			goto error;
@@ -103,8 +103,8 @@ juice_agent_t *agent_create(const juice_config_t *config) {
 	}
 
 	if (agent->config.turn_servers_count) {
-		size_t turn_servers_size = agent->config.turn_servers_count * sizeof(juice_turn_server_t);
-		agent->config.turn_servers = alloc_copy(agent->config.turn_servers, turn_servers_size);
+	size_t turn_servers_size = agent->config.turn_servers_count * sizeof(juice_turn_server_t);
+	agent->config.turn_servers = alloc_copy(agent->config.turn_servers, turn_servers_size);
 		if (!agent->config.turn_servers) {
 			JLOG_FATAL(logger, "alloc for TURN server credentials array failed");
 			goto error;
@@ -166,8 +166,8 @@ void agent_do_destroy(juice_agent_t *agent) {
 		agent_stun_entry_t *entry = agent->entries + i;
 		if (entry->turn) {
 			turn_destroy_map(&entry->turn->map);
-			free(entry->turn);
-		}
+		free(entry->turn);
+	}
 	}
 
 	// Free strings in config
@@ -493,7 +493,7 @@ int agent_channel_send(juice_agent_t *agent, agent_stun_entry_t *entry, const ad
 	uint16_t channel;
 	if (!turn_get_bound_channel(&entry->turn->map, record, &channel, agent->logger))
 		if (agent_send_turn_channel_bind_request(agent, entry, record, ds, &channel) < 0)
-			return -1;
+		return -1;
 
 	JLOG_VERBOSE(agent->logger, "Sending datagram via channel 0x%hX, size=%d", channel, size);
 
@@ -1374,8 +1374,8 @@ int agent_process_stun_binding(juice_agent_t *agent, const stun_message_t *msg,
 	}
 	case STUN_CLASS_RESP_ERROR: {
 		if (msg->error_code != STUN_ERROR_INTERNAL_VALIDATION_FAILED)
-			JLOG_WARN(agent->logger, "Got STUN Binding error response, code=%u",
-			          (unsigned int)msg->error_code);
+		JLOG_WARN(agent->logger, "Got STUN Binding error response, code=%u",
+		          (unsigned int)msg->error_code);
 
 		if (entry->type == AGENT_STUN_ENTRY_TYPE_CHECK && msg->error_code == 487) {
 			// RFC 8445 7.2.5.1. Role Conflict:
@@ -1434,7 +1434,7 @@ int agent_send_stun_binding(juice_agent_t *agent, const agent_stun_entry_t *entr
 	msg.msg_method = STUN_METHOD_BINDING;
 
 	if (transaction_id)
-		memcpy(msg.transaction_id, transaction_id, STUN_TRANSACTION_ID_SIZE);
+	memcpy(msg.transaction_id, transaction_id, STUN_TRANSACTION_ID_SIZE);
 	else if (msg_class == STUN_CLASS_INDICATION)
 		juice_random(msg.transaction_id, STUN_TRANSACTION_ID_SIZE, agent->logger);
 	else
@@ -1588,7 +1588,7 @@ int agent_process_turn_allocate(juice_agent_t *agent, const stun_message_t *msg,
 		if (msg->error_code == 401) { // Unauthorized
 			JLOG_DEBUG(agent->logger, "Got TURN %s Unauthorized response",
 			           msg->msg_method == STUN_METHOD_ALLOCATE ? "Allocate" : "Refresh");
-			if (*entry->turn->credentials.realm != '\0') {
+			if(*entry->turn->credentials.realm != '\0') {
 				JLOG_ERROR(agent->logger, "TURN authentication failed");
 				entry->state = AGENT_STUN_ENTRY_STATE_FAILED;
 				return -1;
@@ -1620,9 +1620,9 @@ int agent_process_turn_allocate(juice_agent_t *agent, const stun_message_t *msg,
 
 		} else {
 			if (msg->error_code != STUN_ERROR_INTERNAL_VALIDATION_FAILED)
-				JLOG_WARN(agent->logger, "Got TURN %s error response, code=%u",
-				          msg->msg_method == STUN_METHOD_ALLOCATE ? "Allocate" : "Refresh",
-				          (unsigned int)msg->error_code);
+			JLOG_WARN(agent->logger, "Got TURN %s error response, code=%u",
+			          msg->msg_method == STUN_METHOD_ALLOCATE ? "Allocate" : "Refresh",
+			          (unsigned int)msg->error_code);
 
 			JLOG_INFO(agent->logger, "TURN allocation failed");
 			entry->state = AGENT_STUN_ENTRY_STATE_FAILED;
@@ -1708,8 +1708,8 @@ int agent_process_turn_create_permission(juice_agent_t *agent, const stun_messag
 	}
 	case STUN_CLASS_RESP_ERROR: {
 		if (msg->error_code != STUN_ERROR_INTERNAL_VALIDATION_FAILED)
-			JLOG_WARN(agent->logger, "Got TURN CreatePermission error response, code=%u",
-			          (unsigned int)msg->error_code);
+		JLOG_WARN(agent->logger, "Got TURN CreatePermission error response, code=%u",
+		          (unsigned int)msg->error_code);
 		break;
 	}
 	default: {
@@ -1787,8 +1787,8 @@ int agent_process_turn_channel_bind(juice_agent_t *agent, const stun_message_t *
 	}
 	case STUN_CLASS_RESP_ERROR: {
 		if (msg->error_code != STUN_ERROR_INTERNAL_VALIDATION_FAILED)
-			JLOG_WARN(agent->logger, "Got TURN ChannelBind error response, code=%u",
-			          (unsigned int)msg->error_code);
+		JLOG_WARN(agent->logger, "Got TURN ChannelBind error response, code=%u",
+		          (unsigned int)msg->error_code);
 		break;
 	}
 	default: {
@@ -1825,7 +1825,7 @@ int agent_send_turn_channel_bind_request(juice_agent_t *agent, agent_stun_entry_
 	uint16_t channel;
 	if (!turn_get_channel(&entry->turn->map, record, &channel, agent->logger))
 		if (!turn_bind_random_channel(&entry->turn->map, record, &channel, 0, agent->logger))
-			return -1;
+		return -1;
 
 	stun_message_t msg;
 	memset(&msg, 0, sizeof(msg));
