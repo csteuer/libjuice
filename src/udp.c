@@ -400,7 +400,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count, juice_log
 					memcpy(&current->addr, sa, len);
 					current->len = len;
 					addr_unmap_inet6_v4mapped((struct sockaddr *)&current->addr, &current->len);
-					addr_set_port((struct sockaddr *)&current->addr, port);
+					addr_set_port((struct sockaddr *)&current->addr, port, logger);
 					++current;
 				}
 			}
