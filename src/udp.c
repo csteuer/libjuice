@@ -477,7 +477,7 @@ int udp_get_addrs(socket_t sock, addr_record_t *records, size_t count, juice_log
 				if (current != end) {
 					memcpy(&current->addr, sin, sizeof(*sin));
 					current->len = sizeof(*sin);
-					addr_set_port((struct sockaddr *)&current->addr, port);
+					addr_set_port((struct sockaddr *)&current->addr, port, logger);
 					++current;
 				}
 			}
