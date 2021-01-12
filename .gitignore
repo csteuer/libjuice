@@ -1,8 +1,9 @@
-build/
+build*/
 *.d
 *.o
 *.a
 *.so
 compile_commands.json
 tests
+CMakeLists.txt.user*
 
