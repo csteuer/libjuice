@@ -123,7 +123,7 @@ juice_server_t *server_create(const juice_server_config_t *config) {
 #ifdef _WIN32
 	WSADATA wsaData;
 	if (WSAStartup(MAKEWORD(2, 2), &wsaData)) {
-		JLOG_FATAL("WSAStartup failed");
+		JLOG_FATAL(logger, "WSAStartup failed");
 		juice_logger_destroy(logger);
 		return NULL;
 	}
