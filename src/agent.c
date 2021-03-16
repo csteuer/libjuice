@@ -785,16 +785,16 @@ int agent_interrupt(juice_agent_t *agent) {
 
 	addr_record_t local;
 	if (udp_get_local_addr(agent->sock, AF_INET, &local, agent->logger) < 0) {
-			mutex_unlock(&agent->mutex);
+		mutex_unlock(&agent->mutex);
 		return -1;
 	}
 
 	if (agent_direct_send(agent, &local, NULL, 0, 0) < 0) {
-	JLOG_WARN(agent->logger, "Failed to interrupt thread by triggering socket, errno=%d",
-	          sockerrno);
-	mutex_unlock(&agent->mutex);
-	return -1;
-}
+		JLOG_WARN(agent->logger, "Failed to interrupt thread by triggering socket, errno=%d",
+		          sockerrno);
+		mutex_unlock(&agent->mutex);
+		return -1;
+	}
 
 	mutex_unlock(&agent->mutex);
 	return 0;
@@ -955,11 +955,12 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
 			                               sizeof(remote_buffer), agent->logger) < 0) {
 				JLOG_ERROR(agent->logger, "Failed to generate SDP for remote candidate");
 			}
-			JLOG_DEBUG(agent->logger,
-			           selected_pair->nominated
-			               ? "New selected and nominated pair.\nLocal: %s\nRemote: %s"
-			               : "New selected pair.\nLocal: %s\nRemote: %s",
-			           local_buffer, remote_buffer);
+			JLOG_DEBUG(
+			    agent->logger,
+			    selected_pair->nominated
+			        ? "New selected and nominated pair with prioriry %u.\nLocal: %s\nRemote: %s"
+			        : "New selected pair with prioriry %u.\nLocal: %s\nRemote: %s",
+			    selected_pair->priority, local_buffer, remote_buffer);
 			agent->selected_pair = selected_pair;
 
 			for (int i = 0; i < agent->entries_count; ++i) {
