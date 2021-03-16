@@ -958,8 +958,8 @@ int agent_bookkeeping(juice_agent_t *agent, timestamp_t *next_timestamp) {
 			JLOG_DEBUG(
 			    agent->logger,
 			    selected_pair->nominated
-			        ? "New selected and nominated pair with prioriry %u.\nLocal: %s\nRemote: %s"
-			        : "New selected pair with prioriry %u.\nLocal: %s\nRemote: %s",
+			        ? "New selected and nominated pair with priority %"PRIu64".\nLocal: %s\nRemote: %s"
+			        : "New selected pair with priority %"PRIu64".\nLocal: %s\nRemote: %s",
 			    selected_pair->priority, local_buffer, remote_buffer);
 			agent->selected_pair = selected_pair;
 
